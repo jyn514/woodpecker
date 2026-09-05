@@ -167,6 +167,19 @@ func (m *tuiModel) scheduleTick() tea.Cmd {
 	return nil
 }
 
+func (log *stepLog) move(key string, height int) {
+	following := !log.viewport.manual
+	lineCount := len(log.lines())
+	log.viewport.move(key, lineCount, height)
+	if following && log.viewport.manual {
+		// Paused views omit an incomplete tail. Convert the offset into that
+		// row space so entering manual mode does not skip an extra line.
+		pausedLineCount := len(log.lines())
+		log.viewport.offsetFromBottom += pausedLineCount - lineCount
+		log.viewport.clamp(pausedLineCount, height)
+	}
+}
+
 func (log *stepLog) clamp(height int) {
 	// Following viewports always have zero offset; unchanged retained text
 	// needs no rendering merely to keep that offset valid.

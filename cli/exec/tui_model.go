@@ -202,7 +202,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgup", "pgdown", "home", "end", "f":
 			log := m.activeLog()
 			if log != nil {
-				log.viewport.move(key, len(log.lines()), m.logHeight())
+				log.move(key, m.logHeight())
 			}
 			return m, nil
 		}

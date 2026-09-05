@@ -88,3 +88,40 @@ func TestCompletionKeepsPausedViewportAnchored(t *testing.T) {
 		})
 	}
 }
+
+func TestPagingFromPartialTailPreservesPageBoundary(t *testing.T) {
+	for _, diagnostics := range []bool{false, true} {
+		name := "step"
+		if diagnostics {
+			name = "diagnostics"
+		}
+		t.Run(name, func(t *testing.T) {
+			m := extensionModel()
+			m.showDiagnostics = diagnostics
+			if diagnostics {
+				m.Update(tea.WindowSizeMsg{Width: 120, Height: 9})
+			}
+			appendData := func(data string) {
+				if diagnostics {
+					m.appendDiagnostic([]byte(data))
+				} else {
+					m.appendLog("a", []byte(data), false)
+				}
+			}
+			appendData("0\n1\n2\n3\n4\n5\n6\n7\n8\n9\npartial")
+			log := m.activeLog()
+			visible := func() []string { return log.viewport.visible(log.lines(), m.logHeight()) }
+			require.Equal(t, []string{"8", "9", "partial"}, visible())
+			m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
+			require.Equal(t, []string{"5", "6", "7"}, visible())
+			appendData(" rest")
+			require.Equal(t, []string{"5", "6", "7"}, visible())
+			appendData("\n")
+			require.Equal(t, []string{"5", "6", "7"}, visible())
+			m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
+			require.Equal(t, []string{"2", "3", "4"}, visible())
+			m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnd}))
+			require.Equal(t, []string{"8", "9", "partial rest"}, visible())
+		})
+	}
+}
