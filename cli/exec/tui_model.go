@@ -137,9 +137,16 @@ func (m *tuiModel) steps() []execStep {
 }
 func (m *tuiModel) View() tea.View {
 	var b strings.Builder
-	fmt.Fprintf(&b, "woodpecker exec — %s\n\n", m.workflow.Name)
+	writeViewLine(&b, m.width, fmt.Sprintf("woodpecker exec — %s", m.workflow.Name))
+	b.WriteByte('\n')
+
 	steps := m.steps()
-	for i, step := range steps {
+	start, end := m.visibleStepRange(len(steps))
+	if start > 0 {
+		writeViewLine(&b, m.width, fmt.Sprintf("  … %d earlier steps", start))
+	}
+	for i := start; i < end; i++ {
+		step := steps[i]
 		cursor := "  "
 		if i == m.selected {
 			cursor = "> "
@@ -148,32 +155,66 @@ func (m *tuiModel) View() tea.View {
 		if !ok {
 			state = stepPending
 		}
-		fmt.Fprintf(&b, "%s%-10s %s\n", cursor, state, step.Name)
+		writeViewLine(&b, m.width, fmt.Sprintf("%s%-10s %s", cursor, state, step.Name))
 	}
+	if end < len(steps) {
+		writeViewLine(&b, m.width, fmt.Sprintf("  … %d later steps", len(steps)-end))
+	}
+
 	if len(steps) != 0 {
 		b.WriteString("\nLogs\n")
 		if log := m.logs[steps[m.selected].ID]; log != nil {
 			if log.truncated {
-				b.WriteString("[earlier output truncated]\n")
+				writeViewLine(&b, m.width, "[earlier output truncated]")
 			}
-			content := string(log.data)
+			lines := strings.Split(string(log.data), "\n")
 			if m.height > 0 {
-				lines := strings.Split(content, "\n")
-				limit := max(m.height-len(steps)-7, 1)
+				limit := max(m.height-(end-start)-9, 1)
 				if len(lines) > limit {
 					lines = lines[len(lines)-limit:]
 				}
-				content = strings.Join(lines, "\n")
 			}
-			b.WriteString(content)
+			for i, line := range lines {
+				if i == len(lines)-1 && line == "" {
+					continue
+				}
+				writeViewLine(&b, m.width, line)
+			}
 		}
 	}
 	if m.confirming {
-		b.WriteString("\nCancel the running workflow? (y/N)")
+		writeViewLine(&b, m.width, "Cancel this command and its running workflow? (y/N)")
 	} else {
-		b.WriteString("\n↑/↓ select • q quit")
+		writeViewLine(&b, m.width, "↑/↓ select • q quit")
 	}
 	view := tea.NewView(b.String())
 	view.AltScreen = true
 	return view
+}
+
+func (m *tuiModel) visibleStepRange(stepCount int) (int, int) {
+	if m.height <= 0 {
+		return 0, stepCount
+	}
+	limit := max(m.height/3, 1)
+	limit = min(limit, max(m.height-8, 1), stepCount)
+	start := max(m.selected-limit/2, 0)
+	end := min(start+limit, stepCount)
+	start = max(end-limit, 0)
+	return start, end
+}
+
+func writeViewLine(b *strings.Builder, width int, line string) {
+	if width > 0 {
+		runes := []rune(line)
+		if len(runes) > width {
+			if width == 1 {
+				line = "…"
+			} else {
+				line = string(runes[:width-1]) + "…"
+			}
+		}
+	}
+	b.WriteString(line)
+	b.WriteByte('\n')
 }

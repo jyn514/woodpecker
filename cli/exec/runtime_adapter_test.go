@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	backend_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
+	pipeline_errors "go.woodpecker-ci.org/woodpecker/v3/pipeline/errors"
 )
 
 func TestStateFromRuntime(t *testing.T) {
@@ -28,6 +29,7 @@ func TestStateFromRuntime(t *testing.T) {
 		{"skipped", backend_types.State{Skipped: true}, stepSkipped},
 		{"canceled", backend_types.State{Exited: true, Error: context.Canceled}, stepCanceled},
 		{"timeout", backend_types.State{Exited: true, Error: context.DeadlineExceeded}, stepCanceled},
+		{"runtime cancellation", backend_types.State{Exited: true, Error: pipeline_errors.ErrCancel}, stepCanceled},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) { assert.Equal(t, tt.want, stateFromRuntime(tt.state)) })

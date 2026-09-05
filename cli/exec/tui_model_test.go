@@ -5,6 +5,8 @@ package exec
 
 import (
 	"bytes"
+	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,6 +32,25 @@ func TestRetainedLogsAreBoundedAndMarked(t *testing.T) {
 	require.LessOrEqual(t, len(m.logs["step"].data), maxRetainedLogBytes)
 	assert.True(t, m.logs["step"].truncated)
 	assert.Contains(t, string(m.logs["step"].data), "visible")
+}
+
+func TestTUIViewKeepsSelectionAndControlsVisible(t *testing.T) {
+	steps := make([]execStep, 20)
+	for i := range steps {
+		steps[i] = execStep{ID: fmt.Sprintf("step-%d", i), Name: strings.Repeat("long-name", 5)}
+	}
+	m := newTUIModel(func() {})
+	_, _ = m.Update(workflowStartedMsg(execWorkflow{ID: "w", Name: "build", Stages: []execStage{{Steps: steps}}}))
+	m.selected = 10
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 30, Height: 12})
+
+	view := m.View().Content
+	assert.Contains(t, view, "> pending")
+	assert.Contains(t, view, "q quit")
+	for _, line := range strings.Split(view, "\n") {
+		assert.LessOrEqual(t, len([]rune(line)), 30)
+	}
+	assert.LessOrEqual(t, len(strings.Split(strings.TrimSuffix(view, "\n"), "\n")), 12)
 }
 
 func TestIngressIsBoundedAndStopsAcceptingAfterClose(t *testing.T) {

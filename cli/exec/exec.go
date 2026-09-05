@@ -69,11 +69,12 @@ func run(ctx context.Context, c *cli.Command) error {
 		if err := validateTUITerminals(os.Stdin, os.Stdout); err != nil {
 			return err
 		}
-		// The TUI owns stdout's terminal. Suppress global diagnostics until it
-		// restores the terminal so asynchronous logs cannot corrupt the display.
-		previousLogger := log.Logger
-		log.Logger = zerolog.Nop()
-		defer func() { log.Logger = previousLogger }()
+		// The TUI owns stdout's terminal. Suppress global diagnostics through
+		// zerolog's concurrency-safe level override so asynchronous logs cannot
+		// corrupt the display.
+		previousLogLevel := zerolog.GlobalLevel()
+		zerolog.SetGlobalLevel(zerolog.Disabled)
+		defer zerolog.SetGlobalLevel(previousLogLevel)
 		session = newTUISession(os.Stdin, os.Stdout)
 	}
 	defer session.Close()
@@ -295,7 +296,6 @@ func runExec(ctx context.Context, c *cli.Command, session execSession, yamls []*
 		session.BeginWorkflow(workflow)
 
 		pipelineCtx, cancel := context.WithTimeout(ctx, c.Duration("timeout"))
-		defer cancel()
 		pipelineCtx = utils.WithContextSigtermCallback(pipelineCtx, func() {
 			session.Print(outputStdout, fmt.Sprintf("ctrl+c received, terminating workflow '%s'\n", item.Workflow.Name))
 		})
@@ -313,6 +313,7 @@ func runExec(ctx context.Context, c *cli.Command, session execSession, yamls []*
 			)
 			return workflowRuntime.Run(ctx)
 		})
+		cancel()
 		if err == nil {
 			// Run does not report step failures as runtime errors, but a failed
 			// step must still let the command exit non-zero.
