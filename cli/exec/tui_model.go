@@ -4,6 +4,7 @@
 package exec
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -17,19 +18,35 @@ type workflowFinishedMsg struct {
 }
 type commandFinishedMsg struct{ err error }
 type eventMsg struct{ event execEvent }
+type logReadyMsg struct{ workflowID, stepID string }
 
+const (
+	maxPendingLogBytes  = 256 * 1024
+	maxRetainedLogBytes = 1024 * 1024
+)
+
+type stepLog struct {
+	data      []byte
+	truncated bool
+}
 type tuiModel struct {
 	workflow            execWorkflow
 	states              map[string]execStepState
+	logs                map[string]*stepLog
 	selected            int
 	width, height       int
 	running, confirming bool
 	finishedErr         error
 	cancel              func()
+	drainLog            func(string, string) ([]byte, bool)
 }
 
-func newTUIModel(cancel func()) *tuiModel {
-	return &tuiModel{states: map[string]execStepState{}, cancel: cancel}
+func newTUIModel(cancel func(), drains ...func(string, string) ([]byte, bool)) *tuiModel {
+	m := &tuiModel{states: map[string]execStepState{}, logs: map[string]*stepLog{}, cancel: cancel}
+	if len(drains) != 0 {
+		m.drainLog = drains[0]
+	}
+	return m
 }
 func (*tuiModel) Init() tea.Cmd { return nil }
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -37,6 +54,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workflowStartedMsg:
 		m.workflow = execWorkflow(msg)
 		m.states = map[string]execStepState{}
+		m.logs = map[string]*stepLog{}
 		m.selected = 0
 		m.running = true
 		m.confirming = false
@@ -50,6 +68,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		if state, ok := msg.event.(stepStateChanged); ok && state.WorkflowID == m.workflow.ID {
 			m.states[state.StepID] = state.State
+		}
+	case logReadyMsg:
+		if msg.workflowID == m.workflow.ID && m.drainLog != nil {
+			data, truncated := m.drainLog(msg.workflowID, msg.stepID)
+			m.appendLog(msg.stepID, data, truncated)
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -84,6 +107,27 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {
+	log := m.logs[id]
+	if log == nil {
+		log = &stepLog{}
+		m.logs[id] = log
+	}
+	log.data = append(log.data, data...)
+	log.truncated = log.truncated || ingressTruncated
+	if len(log.data) <= maxRetainedLogBytes {
+		return
+	}
+	over := len(log.data) - maxRetainedLogBytes
+	if newline := bytes.IndexByte(log.data[over:], '\n'); newline >= 0 {
+		over += newline + 1
+	}
+	log.data = append([]byte(nil), log.data[over:]...)
+	if len(log.data) > maxRetainedLogBytes {
+		log.data = append([]byte(nil), log.data[len(log.data)-maxRetainedLogBytes:]...)
+	}
+	log.truncated = true
+}
 func (m *tuiModel) steps() []execStep {
 	var result []execStep
 	for _, stage := range m.workflow.Stages {
@@ -94,7 +138,8 @@ func (m *tuiModel) steps() []execStep {
 func (m *tuiModel) View() tea.View {
 	var b strings.Builder
 	fmt.Fprintf(&b, "woodpecker exec — %s\n\n", m.workflow.Name)
-	for i, step := range m.steps() {
+	steps := m.steps()
+	for i, step := range steps {
 		cursor := "  "
 		if i == m.selected {
 			cursor = "> "
@@ -104,6 +149,24 @@ func (m *tuiModel) View() tea.View {
 			state = stepPending
 		}
 		fmt.Fprintf(&b, "%s%-10s %s\n", cursor, state, step.Name)
+	}
+	if len(steps) != 0 {
+		b.WriteString("\nLogs\n")
+		if log := m.logs[steps[m.selected].ID]; log != nil {
+			if log.truncated {
+				b.WriteString("[earlier output truncated]\n")
+			}
+			content := string(log.data)
+			if m.height > 0 {
+				lines := strings.Split(content, "\n")
+				limit := max(m.height-len(steps)-7, 1)
+				if len(lines) > limit {
+					lines = lines[len(lines)-limit:]
+				}
+				content = strings.Join(lines, "\n")
+			}
+			b.WriteString(content)
+		}
 	}
 	if m.confirming {
 		b.WriteString("\nCancel the running workflow? (y/N)")
