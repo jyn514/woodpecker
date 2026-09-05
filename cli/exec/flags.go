@@ -23,7 +23,11 @@ import (
 var flags = []cli.Flag{
 	&cli.BoolFlag{
 		Name:  "tui",
-		Usage: "run with an interactive terminal interface",
+		Usage: "force the interactive terminal interface",
+	},
+	&cli.BoolFlag{
+		Name:  "no-tui",
+		Usage: "disable the interactive terminal interface",
 	},
 	&cli.BoolFlag{
 		Sources: cli.EnvVars("WOODPECKER_LOCAL"),

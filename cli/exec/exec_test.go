@@ -101,6 +101,33 @@ func clearEnv(t *testing.T) {
 	os.Clearenv()
 }
 
+func TestSelectTUI(t *testing.T) {
+	tests := []struct {
+		name                          string
+		force, disable, input, output bool
+		want                          bool
+		wantErr                       string
+	}{
+		{name: "automatic", input: true, output: true, want: true},
+		{name: "redirected output", input: true},
+		{name: "disabled", disable: true, input: true, output: true},
+		{name: "forced", force: true, input: true, output: true, want: true},
+		{name: "forced without input", force: true, output: true, wantErr: "--tui requires terminal input"},
+		{name: "conflicting flags", force: true, disable: true, input: true, output: true, wantErr: "--tui and --no-tui cannot be used together"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectTUI(tt.force, tt.disable, tt.input, tt.output)
+			assert.Equal(t, tt.want, got)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestRepoRootFromFile(t *testing.T) {
 	tmp := t.TempDir()
 

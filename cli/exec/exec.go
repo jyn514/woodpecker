@@ -30,6 +30,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 	"go.uber.org/multierr"
+	"golang.org/x/term"
 
 	"go.woodpecker-ci.org/woodpecker/v3/cli/lint"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline"
@@ -64,8 +65,13 @@ var backends = []backend_types.Backend{
 }
 
 func run(ctx context.Context, c *cli.Command) error {
+	useTUI, err := selectTUI(c.Bool("tui"), c.Bool("no-tui"), term.IsTerminal(int(os.Stdin.Fd())), term.IsTerminal(int(os.Stdout.Fd())))
+	if err != nil {
+		return err
+	}
+
 	var session execSession = newPlainSession(sessionWriters{stdout: os.Stdout, stderr: os.Stderr})
-	if c.Bool("tui") {
+	if useTUI {
 		if err := validateTUITerminals(os.Stdin, os.Stdout); err != nil {
 			return err
 		}
@@ -79,6 +85,25 @@ func run(ctx context.Context, c *cli.Command) error {
 	}
 	defer session.Close()
 	return session.Run(ctx, func(ctx context.Context) error { return dispatch(ctx, c, session) })
+}
+
+func selectTUI(force, disable, inputTerminal, outputTerminal bool) (bool, error) {
+	if force && disable {
+		return false, fmt.Errorf("--tui and --no-tui cannot be used together")
+	}
+	if disable {
+		return false, nil
+	}
+	if force {
+		if !inputTerminal {
+			return false, fmt.Errorf("--tui requires terminal input")
+		}
+		if !outputTerminal {
+			return false, fmt.Errorf("--tui requires terminal output")
+		}
+		return true, nil
+	}
+	return inputTerminal && outputTerminal, nil
 }
 
 // TODO: do parallel runs with output to multiple _windows_ e.g. tmux like

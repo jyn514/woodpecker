@@ -31,13 +31,14 @@ woodpecker-cli exec --backend-engine local .woodpecker/my-first-workflow.yaml
 
 ## Use the terminal interface
 
-Pass `--tui` to show the configured steps, their current states, and logs for the selected step:
+When standard input and standard output are terminals, `woodpecker-cli exec` shows the configured steps, their current states, and logs for the selected step. Redirected output and CI jobs continue to use plain text.
+
+Use `--no-tui` to keep plain output in an interactive terminal, or `--tui` to require the terminal interface and fail if either stream is redirected:
 
 ```shell
+woodpecker-cli exec --no-tui .woodpecker/my-first-workflow.yaml
 woodpecker-cli exec --tui .woodpecker/my-first-workflow.yaml
 ```
-
-The terminal interface requires both standard input and standard output to be terminals. It is never enabled automatically, so redirected output and CI jobs continue to use plain text.
 
 Use <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>k</kbd>/<kbd>j</kbd> to select a step. Press <kbd>q</kbd> to quit. While a workflow is running, quitting asks for confirmation and then cancels the command, including any remaining workflows; Woodpecker waits for backend cleanup before restoring the terminal. <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels immediately.
 
