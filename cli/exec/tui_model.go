@@ -32,6 +32,13 @@ type stepLog struct {
 	data      []byte
 	truncated bool
 }
+
+type completedWorkflow struct {
+	workflow execWorkflow
+	states   map[string]execStepState
+	err      error
+}
+
 type tuiModel struct {
 	workflow            execWorkflow
 	states              map[string]execStepState
@@ -43,6 +50,7 @@ type tuiModel struct {
 	finishing           bool
 	syncReportSeen      bool
 	unicodeReportSeen   bool
+	completed           []completedWorkflow
 	cancel              func()
 	drainLog            func(string, string) ([]byte, bool)
 }
@@ -67,6 +75,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workflowFinishedMsg:
 		m.running = false
 		m.finishedErr = msg.err
+		states := make(map[string]execStepState, len(m.states))
+		for id, state := range m.states {
+			states[id] = state
+		}
+		m.completed = append(m.completed, completedWorkflow{workflow: m.workflow, states: states, err: msg.err})
 	case commandFinishedMsg:
 		m.running = false
 		m.finishedErr = msg.err
@@ -133,6 +146,33 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 func (m *tuiModel) probesDrained() bool {
 	return m.syncReportSeen && m.unicodeReportSeen
+}
+
+func (m *tuiModel) finalSummary() string {
+	if len(m.completed) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, result := range m.completed {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		status := "successful"
+		if result.err != nil {
+			status = "failed"
+		}
+		fmt.Fprintf(&b, "woodpecker exec — %s: %s\n", result.workflow.Name, status)
+		for _, stage := range result.workflow.Stages {
+			for _, step := range stage.Steps {
+				state, ok := result.states[step.ID]
+				if !ok {
+					state = stepPending
+				}
+				fmt.Fprintf(&b, "  %-10s %s\n", state, step.Name)
+			}
+		}
+	}
+	return b.String()
 }
 
 func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {

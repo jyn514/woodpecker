@@ -26,6 +26,16 @@ func TestTUIModelSelectionStateAndResize(t *testing.T) {
 	assert.Contains(t, m.View().Content, "successful first")
 }
 
+func TestTUIFinalSummaryRetainsCompletedWorkflows(t *testing.T) {
+	m := newTUIModel(func() {})
+	workflow := execWorkflow{ID: "w", Name: "build", Stages: []execStage{{Steps: []execStep{{ID: "a", Name: "test"}}}}}
+	_, _ = m.Update(workflowStartedMsg(workflow))
+	_, _ = m.Update(eventMsg{event: stepStateChanged{WorkflowID: "w", StepID: "a", State: stepSuccessful}})
+	_, _ = m.Update(workflowFinishedMsg{id: "w"})
+
+	assert.Equal(t, "woodpecker exec — build: successful\n  successful test\n", m.finalSummary())
+}
+
 func TestTUIWaitsForCapabilityRepliesBeforeQuitting(t *testing.T) {
 	m := newTUIModel(func() {})
 	_, timeout := m.Update(commandFinishedMsg{})

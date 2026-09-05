@@ -126,7 +126,7 @@ func (s *tuiSession) Run(ctx context.Context, execute func(context.Context) erro
 	s.mu.Unlock()
 	result := make(chan error, 1)
 	go func() { err := execute(runCtx); result <- err; s.send(commandFinishedMsg{err: err}) }()
-	_, uiErr := p.Run()
+	finalModel, uiErr := p.Run()
 	// If the terminal or Bubble Tea exits before execution, stop the command and
 	// wait for runtime cleanup rather than leaving a workflow running unseen.
 	cancel()
@@ -135,6 +135,14 @@ func (s *tuiSession) Run(ctx context.Context, execute func(context.Context) erro
 	s.closed = true
 	s.commandCancel = nil
 	s.mu.Unlock()
-	return multierr.Combine(execErr, uiErr)
+	var summaryErr error
+	if uiErr == nil {
+		if model, ok := finalModel.(*tuiModel); ok {
+			if summary := model.finalSummary(); summary != "" {
+				_, summaryErr = io.WriteString(s.output, summary)
+			}
+		}
+	}
+	return multierr.Combine(execErr, uiErr, summaryErr)
 }
 func (s *tuiSession) Close() error { s.mu.Lock(); s.closed = true; s.mu.Unlock(); return nil }
