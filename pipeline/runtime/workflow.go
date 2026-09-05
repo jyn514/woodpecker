@@ -51,8 +51,15 @@ func (r *Runtime) Run(runnerCtx context.Context) error {
 		}
 	})
 
-	// we make sure cleanup always happens
-	defer destroyWorkflowFunc()
+	// Destroy before draining: detached processes may only exit when the backend
+	// tears down the workflow. Every exit path, including cancellation, must
+	// then wait for their logger and tracer callbacks before Run returns.
+	defer func() {
+		destroyWorkflowFunc()
+		logger.Debug().Msg("waiting for logs and traces upload")
+		r.uploadWait.Wait()
+		logger.Debug().Msg("logs and traces uploaded")
+	}()
 
 	r.started = time.Now().Unix()
 
@@ -73,14 +80,6 @@ func (r *Runtime) Run(runnerCtx context.Context) error {
 			}
 		}
 	}
-
-	// Now we can shutdown the workflow
-	destroyWorkflowFunc()
-
-	// Ensure all logs/traces are uploaded before finishing
-	logger.Debug().Msg("waiting for logs and traces upload")
-	r.uploadWait.Wait()
-	logger.Debug().Msg("logs and traces uploaded")
 
 	// A failing step is a successfully executed task from the runtime's point of
 	// view. It is reported through the step states, which make the workflow fail,
