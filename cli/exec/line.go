@@ -17,7 +17,6 @@ package exec
 import (
 	"fmt"
 	"io"
-	"os"
 	"time"
 )
 
@@ -27,19 +26,25 @@ type LineWriter struct {
 	stepUUID  string
 	num       int
 	startTime time.Time
+	output    io.Writer
 }
 
 // NewLineWriter returns a new line reader.
-func NewLineWriter(stepName, stepUUID string) io.WriteCloser {
+func NewLineWriter(stepName, stepUUID string, output ...io.Writer) io.WriteCloser {
+	writer := io.Discard
+	if len(output) != 0 {
+		writer = output[0]
+	}
 	return &LineWriter{
 		stepName:  stepName,
 		stepUUID:  stepUUID,
 		startTime: time.Now().UTC(),
+		output:    writer,
 	}
 }
 
 func (w *LineWriter) Write(p []byte) (n int, err error) {
-	fmt.Fprintf(os.Stderr, "[%s:L%d:%ds] %s", w.stepName, w.num, int64(time.Since(w.startTime).Seconds()), p)
+	_, _ = fmt.Fprintf(w.output, "[%s:L%d:%ds] %s", w.stepName, w.num, int64(time.Since(w.startTime).Seconds()), p)
 	w.num++
 	return len(p), nil
 }

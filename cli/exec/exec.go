@@ -30,7 +30,6 @@ import (
 	"github.com/urfave/cli/v3"
 	"go.uber.org/multierr"
 
-	"go.woodpecker-ci.org/woodpecker/v3/cli/common"
 	"go.woodpecker-ci.org/woodpecker/v3/cli/lint"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend"
@@ -64,11 +63,12 @@ var backends = []backend_types.Backend{
 }
 
 func run(ctx context.Context, c *cli.Command) error {
-	return common.RunPipelineFunc(ctx, c, execFile, execDir)
+	session := newPlainSession(sessionWriters{stdout: os.Stdout, stderr: os.Stderr})
+	return session.Run(ctx, func(ctx context.Context) error { return dispatch(ctx, c, session) })
 }
 
 // TODO: do parallel runs with output to multiple _windows_ e.g. tmux like
-func execDir(ctx context.Context, c *cli.Command, dir string) error {
+func execDir(ctx context.Context, c *cli.Command, session execSession, dir string) error {
 	// TODO: respect pipeline dependency
 	repoPath := c.String("repo-path")
 	if repoPath != "" {
@@ -98,7 +98,7 @@ func execDir(ctx context.Context, c *cli.Command, dir string) error {
 		return walkErr
 	}
 
-	return runExec(ctx, c, yamls, repoPath)
+	return runExec(ctx, c, session, yamls, repoPath)
 }
 
 func repoRootFromFile(file string) string {
@@ -117,7 +117,7 @@ func repoRootFromFile(file string) string {
 	return root
 }
 
-func execFile(ctx context.Context, c *cli.Command, file string) error {
+func execFile(ctx context.Context, c *cli.Command, session execSession, file string) error {
 	repoPath := c.String("repo-path")
 	if repoPath != "" {
 		repoPath, _ = filepath.Abs(repoPath)
@@ -132,10 +132,10 @@ func execFile(ctx context.Context, c *cli.Command, file string) error {
 	if err != nil {
 		return err
 	}
-	return runExec(ctx, c, []*builder.YamlFile{{Name: file, Data: dat}}, repoPath)
+	return runExec(ctx, c, session, []*builder.YamlFile{{Name: file, Data: dat}}, repoPath)
 }
 
-func runExec(ctx context.Context, c *cli.Command, yamls []*builder.YamlFile, repoPath string) error {
+func runExec(ctx context.Context, c *cli.Command, session execSession, yamls []*builder.YamlFile, repoPath string) error {
 	// if we use the local backend we should signal to run at $repoPath
 	if c.String("backend-engine") == "local" {
 		local.CLIWorkaroundExecAtDir = repoPath
@@ -252,7 +252,7 @@ func runExec(ctx context.Context, c *cli.Command, yamls []*builder.YamlFile, rep
 	items, err := b.Build()
 	if err != nil {
 		str, fmtErr := lint.FormatLintError("pipeline", err, false)
-		fmt.Print(str)
+		session.Print(outputStdout, str)
 		if fmtErr != nil {
 			return fmtErr
 		}
@@ -274,18 +274,18 @@ func runExec(ctx context.Context, c *cli.Command, yamls []*builder.YamlFile, rep
 	var execErr error
 	// TODO: respect depends_on and run in parallel where possible
 	for _, item := range items {
-		fmt.Println("#", item.Workflow.Name)
+		session.Print(outputStdout, fmt.Sprintf("# %s\n", item.Workflow.Name))
 
 		pipelineCtx, cancel := context.WithTimeout(context.Background(), c.Duration("timeout"))
 		defer cancel()
 		pipelineCtx = utils.WithContextSigtermCallback(pipelineCtx, func() {
-			fmt.Printf("ctrl+c received, terminating workflow '%s'\n", item.Workflow.Name)
+			session.Print(outputStdout, fmt.Sprintf("ctrl+c received, terminating workflow '%s'\n", item.Workflow.Name))
 		})
 
 		runtime := pipeline_runtime.New(
 			item.Config, backendEngine,
 			pipeline_runtime.WithContext(pipelineCtx), //nolint:contextcheck
-			pipeline_runtime.WithLogger(defaultLogger),
+			pipeline_runtime.WithLogger(session.Logger(item.Workflow.Name)),
 			pipeline_runtime.WithDescription(map[string]string{
 				"CLI": "exec",
 			}),
@@ -298,10 +298,10 @@ func runExec(ctx context.Context, c *cli.Command, yamls []*builder.YamlFile, rep
 			err = runtime.Err()
 		}
 		if err != nil {
-			fmt.Println(err)
+			session.Print(outputStdout, fmt.Sprintln(err))
 			execErr = multierr.Append(execErr, err)
 		}
-		fmt.Println("")
+		session.Print(outputStdout, "\n")
 	}
 	return execErr
 }
@@ -325,7 +325,9 @@ func convertPathForWindows(path string) string {
 	return filepath.ToSlash(path)
 }
 
-var defaultLogger = logging.Logger(func(step *backend_types.Step, rc io.ReadCloser) error {
-	logWriter := NewLineWriter(step.Name, step.UUID)
-	return pipeline_utils.CopyLineByLine(logWriter, rc, pipeline.MaxLogLineLength)
-})
+func lineLogger(output io.Writer) logging.Logger {
+	return func(step *backend_types.Step, rc io.ReadCloser) error {
+		logWriter := NewLineWriter(step.Name, step.UUID, output)
+		return pipeline_utils.CopyLineByLine(logWriter, rc, pipeline.MaxLogLineLength)
+	}
+}
