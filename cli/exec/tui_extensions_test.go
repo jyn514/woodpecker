@@ -117,10 +117,35 @@ func TestPausedLogSurvivesEvictionAndPartialLines(t *testing.T) {
 	assert.Equal(t, before, log.viewport.visible(log.lines(), m.logHeight()))
 }
 
+func TestIngressGapCannotInventCommandOrResetCollapse(t *testing.T) {
+	m := extensionModel()
+	m.workflow.Stages[0].Steps[0].Commands = []string{"echo hello"}
+	m.appendLog("a", []byte("+ echo hello\nbody\n+ "), false)
+	log := m.activeLog()
+	log.groups.toggleCollapsed()
+	m.appendLog("a", []byte("echo hello\nunrelated\n"), true)
+	assert.True(t, log.groups.collapsed)
+	assert.Contains(t, log.groups.render(log.data), "unrelated")
+	m.appendLog("a", []byte("+ echo hello\nnew body\n"), false)
+	assert.NotContains(t, log.groups.render(log.data), "new body")
+}
+
 func TestLateTickCannotDecreaseObservedTime(t *testing.T) {
 	m := extensionModel()
 	at := time.Now()
 	m.Update(eventMsg{event: stepStateChanged{WorkflowID: "w", StepID: "a", State: stepRunning, At: at}})
 	m.Update(durationTickMsg(at.Add(-time.Second)))
 	assert.Equal(t, at, m.now)
+}
+
+func TestCompletionExposesFinalPartialLineAndIngressMarksGap(t *testing.T) {
+	m := extensionModel()
+	m.appendLog("a", []byte("result: SU"), false)
+	m.appendLog("a", []byte("CCESS\n"), true)
+	assert.NotContains(t, m.logs["a"].groups.render(m.logs["a"].data), "result: SUCCESS")
+	assert.Contains(t, m.logs["a"].groups.render(m.logs["a"].data), "[log bytes discarded]")
+	m.appendLog("b", []byte("final error"), false)
+	m.logs["b"].viewport.manual = true
+	m.Update(workflowFinishedMsg{id: "w", At: time.Now()})
+	assert.Equal(t, []string{"final error"}, m.logs["b"].lines())
 }

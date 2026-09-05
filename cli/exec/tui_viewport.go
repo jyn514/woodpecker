@@ -159,7 +159,7 @@ func (log *stepLog) finish() {
 }
 
 func (log *stepLog) lines() []string {
-	data := string(log.data)
+	data := log.groups.render(log.data)
 	// While paused, only completed lines advance the viewport. Once execution
 	// ends, expose the final unterminated line as well.
 	if log.viewport.manual && !log.complete && !strings.HasSuffix(data, "\n") {
@@ -172,8 +172,17 @@ func (log *stepLog) lines() []string {
 	return displayLines([]byte(data))
 }
 
+func (m *tuiModel) stepCommands(id string) []string {
+	for _, step := range m.steps() {
+		if step.ID == id {
+			return step.Commands
+		}
+	}
+	return nil
+}
+
 func (m *tuiModel) newStepLog(id string) *stepLog {
-	return &stepLog{}
+	return &stepLog{groups: newLogGroups(m.stepCommands(id))}
 }
 
 func (m *tuiModel) clampViewports() {

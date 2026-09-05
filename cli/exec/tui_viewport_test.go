@@ -24,6 +24,7 @@ import (
 
 func TestTerminalNavigationKeysControlActiveLog(t *testing.T) {
 	m := extensionModel()
+	m.workflow.Stages[0].Steps[0].Commands = []string{"echo run"}
 	m.appendLog("a", []byte("+ echo run\n0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n"), false)
 	log := m.activeLog()
 	visible := func() []string { return log.viewport.visible(log.lines(), m.logHeight()) }
@@ -36,6 +37,9 @@ func TestTerminalNavigationKeysControlActiveLog(t *testing.T) {
 	require.Equal(t, []string{"+ echo run", "0", "1"}, visible())
 	key(m, "f")
 	require.Equal(t, []string{"7", "8", "9"}, visible())
+	key(m, "c")
+	require.Equal(t, []string{"+ echo run", "  [output collapsed]"}, visible())
+	key(m, "c")
 	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnd}))
 	require.Equal(t, []string{"7", "8", "9"}, visible())
 }

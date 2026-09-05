@@ -25,6 +25,7 @@ type execStep struct {
 	ID       string
 	Name     string
 	Detached bool
+	Commands []string
 }
 
 type execStepState uint8
@@ -74,7 +75,9 @@ func workflowDescriptor(name string, config *backend_types.Config) execWorkflow 
 	for i, stage := range config.Stages {
 		s := execStage{Name: fmt.Sprintf("Stage %d", i+1), Steps: make([]execStep, 0, len(stage.Steps))}
 		for _, step := range stage.Steps {
-			s.Steps = append(s.Steps, execStep{ID: step.UUID, Name: step.Name, Detached: step.Detached})
+			descriptor := execStep{ID: step.UUID, Name: step.Name, Detached: step.Detached}
+			descriptor.Commands = eligibleCommands(step.Commands)
+			s.Steps = append(s.Steps, descriptor)
 		}
 		w.Stages = append(w.Stages, s)
 	}

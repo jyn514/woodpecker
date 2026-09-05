@@ -49,14 +49,17 @@ Use these keys to navigate the interface:
 | <kbd>PgUp</kbd>/<kbd>PgDn</kbd> | Scroll the active log pane. |
 | <kbd>Home</kbd> | Jump to the oldest retained line. |
 | <kbd>End</kbd> or <kbd>f</kbd> | Jump to the newest line and resume following output. |
+| <kbd>c</kbd> | Collapse or expand all recognized command groups for the selected step. |
 
-Each step and the diagnostics pane keep an independent scroll position. Step logs initially follow new output, including when you first select a step. Scrolling pauses following so you can read earlier output; switching steps preserves each step's position. Step scroll positions reset when the next workflow starts. Resizing or log truncation may adjust the position to fit the remaining lines.
+Each step and the diagnostics pane keep an independent scroll position. Step logs initially follow new output, including when you first select a step. Scrolling pauses following so you can read earlier output; switching steps preserves each step's position. Step scroll positions reset when the next workflow starts. Resizing, log truncation, or collapsing groups may adjust the position to fit the remaining lines.
 
 Step durations in the interface and final summary are observed by the CLI, not measurements of backend process runtime. Running durations advance until a terminal event is observed. At workflow completion, a step still reported as running becomes `unknown` and its duration freezes; a pending step that never started becomes `not-run`. Neither fallback implies success.
 
+Command groups are recognized only when a shell echo beginning with `+ ` exactly matches a non-empty, single-line compiled command after removing line endings. Whitespace, quoting, ANSI sequences, matrix substitutions, and shell rewrites are not normalized. Multiline commands are not recognized, and unmatched output remains ordinary log output. Output before the first recognized command belongs to an initialization group. Pressing <kbd>c</kbd> toggles all recognized groups together; individual command navigation is not supported.
+
 Press <kbd>q</kbd> to quit. While a workflow is running, quitting asks for confirmation and then cancels the command, including any remaining workflows; Woodpecker waits for backend cleanup before restoring the terminal. While confirmation is visible, navigation controls are inactive. <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels immediately.
 
-Logs are kept in memory only; the interface does not write log files. It retains at most 1 MiB per step, buffers at most 256 KiB of pending display data per step, and retains at most 256 KiB of diagnostics. A truncation marker indicates when earlier output was discarded. The backend log reader continues draining after truncation or cancellation. These presentation features do not change plain-text output.
+Logs are kept in memory only; the interface does not write log files. It retains at most 1 MiB per step, buffers at most 256 KiB of pending display data per step, and retains at most 256 KiB of diagnostics. Command-group metadata is limited to 1,024 groups per step and refers to the same bounded log buffer. A truncation marker indicates when earlier output was discarded. The backend log reader continues draining after truncation or cancellation. These presentation features do not change plain-text output.
 
 ## Pass metadata
 

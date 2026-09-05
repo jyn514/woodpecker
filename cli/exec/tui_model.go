@@ -60,6 +60,7 @@ type stepLog struct {
 	data      []byte
 	truncated bool
 	viewport  logViewport
+	groups    logGroups
 	complete  bool
 }
 
@@ -190,6 +191,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "c":
+			if !m.showDiagnostics {
+				if log := m.activeLog(); log != nil {
+					log.groups.toggleCollapsed()
+					m.clampViewports()
+				}
+			}
+			return m, nil
 		case "pgup", "pgdown", "home", "end", "f":
 			log := m.activeLog()
 			if log != nil {
@@ -279,8 +288,26 @@ func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {
 		log = m.newStepLog(id)
 		m.logs[id] = log
 	}
-	log.viewport.appended(bytes.Count(data, []byte{'\n'}))
+	if ingressTruncated {
+		// Never discard a gap marker while keeping bytes on both sides of it:
+		// that could turn incomplete output into a misleading complete line.
+		if evicted := log.groups.makeRoomForGap(); evicted > 0 {
+			log.data = append([]byte(nil), log.data[evicted:]...)
+			log.groups.update(log.data, evicted)
+			log.truncated = true
+		}
+	}
+	beforeLines := bytes.Count([]byte(log.groups.render(log.data)), []byte{'\n'})
+	if ingressTruncated {
+		log.groups.gap(len(log.data))
+	}
 	log.data = append(log.data, data...)
+	log.groups.update(log.data, 0)
+	afterLines := bytes.Count([]byte(log.groups.render(log.data)), []byte{'\n'})
+	log.viewport.appended(max(afterLines-beforeLines, 0))
+	oldLen := len(log.data)
+	defer func() { log.groups.update(log.data, oldLen-len(log.data)) }()
+
 	log.truncated = log.truncated || ingressTruncated
 	if len(log.data) <= maxRetainedLogBytes {
 		return
@@ -364,7 +391,7 @@ func (m *tuiModel) View() tea.View {
 	if m.confirming {
 		writeViewLine(&b, m.width, "Cancel this command and its running workflow? (y/N)")
 	} else {
-		writeViewLine(&b, m.width, "↑/↓ select • q quit • d logs • PgUp/PgDn scroll • f tail")
+		writeViewLine(&b, m.width, "↑/↓ select • q quit • d logs • PgUp/PgDn scroll • f tail • c collapse")
 	}
 	view := tea.NewView(b.String())
 	view.AltScreen = true

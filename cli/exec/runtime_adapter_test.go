@@ -53,6 +53,15 @@ func TestWorkflowDescriptorPreservesOrderAndUUIDIdentity(t *testing.T) {
 	assert.True(t, got.Stages[0].Steps[1].Detached)
 }
 
+// Matching must not silently normalize shell syntax or retain mutable config slices.
+func TestWorkflowDescriptorCopiesOnlyExactSingleLineCommands(t *testing.T) {
+	commands := []string{"", "echo first", "echo first\necho second", "echo CR\r", " echo 'quoted'  ", " ", "echo first"}
+	config := &backend_types.Config{Stages: []*backend_types.Stage{{Steps: []*backend_types.Step{{UUID: "cmd", Commands: commands}}}}}
+	got := workflowDescriptor("build", config).Stages[0].Steps[0]
+	commands[1] = "changed after compilation"
+	assert.Equal(t, []string{"echo first", " echo 'quoted'  ", " ", "echo first"}, got.Commands)
+}
+
 // A clock read at tracer construction would give every concurrent step the same start time.
 func TestEventTracerTimestampsEachIdentifiedNotification(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
