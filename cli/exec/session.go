@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/logging"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/tracing"
 )
 
 type outputStream uint8
@@ -19,7 +20,12 @@ const (
 
 type execSession interface {
 	Print(outputStream, string)
+	BeginWorkflow(execWorkflow)
+	FinishWorkflow(string, error)
+	Submit(execEvent)
 	Logger(string) logging.Logger
+	Tracer(string) tracing.Tracer
+	ExecuteWorkflow(context.Context, execWorkflow, func(context.Context) error) error
 	Run(context.Context, func(context.Context) error) error
 	Close() error
 }

@@ -275,8 +275,10 @@ func runExec(ctx context.Context, c *cli.Command, session execSession, yamls []*
 	// TODO: respect depends_on and run in parallel where possible
 	for _, item := range items {
 		session.Print(outputStdout, fmt.Sprintf("# %s\n", item.Workflow.Name))
+		workflow := workflowDescriptor(item.Workflow.Name, item.Config)
+		session.BeginWorkflow(workflow)
 
-		pipelineCtx, cancel := context.WithTimeout(context.Background(), c.Duration("timeout"))
+		pipelineCtx, cancel := context.WithTimeout(ctx, c.Duration("timeout"))
 		defer cancel()
 		pipelineCtx = utils.WithContextSigtermCallback(pipelineCtx, func() {
 			session.Print(outputStdout, fmt.Sprintf("ctrl+c received, terminating workflow '%s'\n", item.Workflow.Name))
@@ -285,18 +287,22 @@ func runExec(ctx context.Context, c *cli.Command, session execSession, yamls []*
 		runtime := pipeline_runtime.New(
 			item.Config, backendEngine,
 			pipeline_runtime.WithContext(pipelineCtx), //nolint:contextcheck
-			pipeline_runtime.WithLogger(session.Logger(item.Workflow.Name)),
+			pipeline_runtime.WithLogger(session.Logger(workflow.ID)),
+			pipeline_runtime.WithTracer(session.Tracer(workflow.ID)),
 			pipeline_runtime.WithDescription(map[string]string{
 				"CLI": "exec",
 			}),
 		)
 
-		err := runtime.Run(ctx)
+		err := session.ExecuteWorkflow(pipelineCtx, workflow, func(context.Context) error {
+			return runtime.Run(ctx)
+		})
 		if err == nil {
 			// Run does not report step failures as runtime errors, but a failed
 			// step must still let the command exit non-zero.
 			err = runtime.Err()
 		}
+		session.FinishWorkflow(workflow.ID, err)
 		if err != nil {
 			session.Print(outputStdout, fmt.Sprintln(err))
 			execErr = multierr.Append(execErr, err)
