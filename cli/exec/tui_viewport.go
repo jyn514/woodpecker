@@ -77,13 +77,28 @@ func (v logViewport) visible(lines []string, height int) []string {
 }
 
 func (m *tuiModel) logHeight() int {
+	if m.showDiagnostics {
+		return m.diagnosticLogHeight()
+	}
+	return m.stepLogHeight()
+}
+
+func (m *tuiModel) diagnosticLogHeight() int {
 	if m.height <= 0 {
 		return unboundedLogRows
 	}
-	if m.showDiagnostics {
-		return max(m.height-diagnosticChromeRows, 1)
+	return max(m.height-diagnosticChromeRows, 1)
+}
+
+func (m *tuiModel) stepLogHeight() int {
+	if m.height <= 0 {
+		return unboundedLogRows
 	}
-	start, end := m.visibleStepRange(len(m.steps()))
+	stepCount := 0
+	for _, stage := range m.workflow.Stages {
+		stepCount += len(stage.Steps)
+	}
+	start, end := m.visibleStepRange(stepCount)
 	return max(m.height-(end-start)-stepChromeRows, 1)
 }
 
@@ -152,7 +167,22 @@ func (m *tuiModel) scheduleTick() tea.Cmd {
 	return nil
 }
 
+func (log *stepLog) clamp(height int) {
+	// Following viewports always have zero offset; unchanged retained text
+	// needs no rendering merely to keep that offset valid.
+	if log.viewport.manual {
+		log.viewport.clamp(len(log.lines()), height)
+	}
+}
+
 func (log *stepLog) finish() {
+	if log.complete {
+		return
+	}
+	if !log.viewport.manual {
+		log.complete = true
+		return
+	}
 	before := len(log.lines())
 	log.complete = true
 	log.viewport.appended(len(log.lines()) - before)
@@ -186,17 +216,9 @@ func (m *tuiModel) newStepLog(id string) *stepLog {
 }
 
 func (m *tuiModel) clampViewports() {
-	start, end := m.visibleStepRange(len(m.steps()))
-	height := max(m.height-(end-start)-stepChromeRows, 1)
-	if m.height <= 0 {
-		height = unboundedLogRows
-	}
+	height := m.stepLogHeight()
 	for _, log := range m.logs {
-		log.viewport.clamp(len(log.lines()), height)
+		log.clamp(height)
 	}
-	diagnosticHeight := max(m.height-diagnosticChromeRows, 1)
-	if m.height <= 0 {
-		diagnosticHeight = unboundedLogRows
-	}
-	m.diagnostics.viewport.clamp(len(m.diagnostics.lines()), diagnosticHeight)
+	m.diagnostics.clamp(m.diagnosticLogHeight())
 }

@@ -139,7 +139,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.completed = append(m.completed, completedWorkflow{workflow: m.workflow, states: states, timings: m.timings, err: msg.err})
 	case commandFinishedMsg:
 		m.diagnostics.finish()
-		m.clampViewports()
+		m.diagnostics.clamp(m.diagnosticLogHeight())
 		m.running = false
 		m.finishedErr = msg.err
 		m.finishing = true
@@ -195,7 +195,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.showDiagnostics {
 				if log := m.activeLog(); log != nil {
 					log.groups.toggleCollapsed()
-					m.clampViewports()
+					log.clamp(m.stepLogHeight())
 				}
 			}
 			return m, nil
@@ -271,7 +271,7 @@ func (m *tuiModel) finalSummary() string {
 }
 
 func (m *tuiModel) appendDiagnostic(data []byte) {
-	defer m.clampViewports()
+	defer m.diagnostics.clamp(m.diagnosticLogHeight())
 	m.diagnostics.viewport.appended(bytes.Count(data, []byte{'\n'}))
 	m.diagnostics.data = append(m.diagnostics.data, data...)
 	if len(m.diagnostics.data) <= maxDiagnosticBytes {
@@ -282,12 +282,12 @@ func (m *tuiModel) appendDiagnostic(data []byte) {
 }
 
 func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {
-	defer m.clampViewports()
 	log := m.logs[id]
 	if log == nil {
 		log = m.newStepLog(id)
 		m.logs[id] = log
 	}
+	defer log.clamp(m.stepLogHeight())
 	if ingressTruncated {
 		// Never discard a gap marker while keeping bytes on both sides of it:
 		// that could turn incomplete output into a misleading complete line.
@@ -297,14 +297,19 @@ func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {
 			log.truncated = true
 		}
 	}
-	beforeLines := bytes.Count([]byte(log.groups.render(log.data)), []byte{'\n'})
+	var beforeLines int
+	if log.viewport.manual {
+		beforeLines = bytes.Count([]byte(log.groups.render(log.data)), []byte{'\n'})
+	}
 	if ingressTruncated {
 		log.groups.gap(len(log.data))
 	}
 	log.data = append(log.data, data...)
 	log.groups.update(log.data, 0)
-	afterLines := bytes.Count([]byte(log.groups.render(log.data)), []byte{'\n'})
-	log.viewport.appended(max(afterLines-beforeLines, 0))
+	if log.viewport.manual {
+		afterLines := bytes.Count([]byte(log.groups.render(log.data)), []byte{'\n'})
+		log.viewport.appended(max(afterLines-beforeLines, 0))
+	}
 	oldLen := len(log.data)
 	defer func() { log.groups.update(log.data, oldLen-len(log.data)) }()
 
