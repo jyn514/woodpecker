@@ -17,6 +17,7 @@ package exec
 import (
 	"fmt"
 	"io"
+	"os"
 	"time"
 )
 
@@ -31,7 +32,7 @@ type LineWriter struct {
 
 // NewLineWriter returns a new line reader.
 func NewLineWriter(stepName, stepUUID string, output ...io.Writer) io.WriteCloser {
-	writer := io.Discard
+	writer := io.Writer(os.Stderr)
 	if len(output) != 0 {
 		writer = output[0]
 	}

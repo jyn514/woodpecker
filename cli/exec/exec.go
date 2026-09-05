@@ -26,6 +26,7 @@ import (
 
 	"codeberg.org/6543/xyaml/v2"
 	"github.com/oklog/ulid/v2"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 	"go.uber.org/multierr"
@@ -68,6 +69,11 @@ func run(ctx context.Context, c *cli.Command) error {
 		if err := validateTUITerminals(os.Stdin, os.Stdout); err != nil {
 			return err
 		}
+		// The TUI owns stdout's terminal. Suppress global diagnostics until it
+		// restores the terminal so asynchronous logs cannot corrupt the display.
+		previousLogger := log.Logger
+		log.Logger = zerolog.Nop()
+		defer func() { log.Logger = previousLogger }()
 		session = newTUISession(os.Stdin, os.Stdout)
 	}
 	defer session.Close()
@@ -281,6 +287,9 @@ func runExec(ctx context.Context, c *cli.Command, session execSession, yamls []*
 	var execErr error
 	// TODO: respect depends_on and run in parallel where possible
 	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return multierr.Append(execErr, err)
+		}
 		session.Print(outputStdout, fmt.Sprintf("# %s\n", item.Workflow.Name))
 		workflow := workflowDescriptor(item.Workflow.Name, item.Config)
 		session.BeginWorkflow(workflow)

@@ -25,13 +25,13 @@ type ingressLog struct {
 }
 
 type tuiSession struct {
-	input   io.Reader
-	output  io.Writer
-	program *tea.Program
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	closed  bool
-	ingress map[string]*ingressLog
+	input         io.Reader
+	output        io.Writer
+	program       *tea.Program
+	mu            sync.Mutex
+	commandCancel context.CancelFunc
+	closed        bool
+	ingress       map[string]*ingressLog
 }
 
 func validateTUITerminals(input, output *os.File) error {
@@ -103,34 +103,37 @@ func (s *tuiSession) drainLog(workflowID, stepID string) ([]byte, bool) {
 }
 func (s *tuiSession) Logger(id string) logging.Logger { return eventLogger(id, s.Submit) }
 func (s *tuiSession) Tracer(id string) tracing.Tracer { return eventTracer(id, s.Submit) }
-func (s *tuiSession) cancelWorkflow() {
+func (s *tuiSession) cancelCommand() {
 	s.mu.Lock()
-	cancel := s.cancel
+	cancel := s.commandCancel
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 }
-func (s *tuiSession) ExecuteWorkflow(parent context.Context, _ execWorkflow, execute func(context.Context) error) error {
-	ctx, cancel := context.WithCancel(parent)
-	s.mu.Lock()
-	s.cancel = cancel
-	s.mu.Unlock()
-	defer func() { cancel(); s.mu.Lock(); s.cancel = nil; s.mu.Unlock() }()
-	return execute(ctx)
+func (*tuiSession) ExecuteWorkflow(parent context.Context, _ execWorkflow, execute func(context.Context) error) error {
+	return execute(parent)
 }
 func (s *tuiSession) Run(ctx context.Context, execute func(context.Context) error) error {
-	model := newTUIModel(s.cancelWorkflow, s.drainLog)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	model := newTUIModel(s.cancelCommand, s.drainLog)
 	p := tea.NewProgram(model, tea.WithInput(s.input), tea.WithOutput(s.output), tea.WithoutSignals())
 	s.mu.Lock()
 	s.program = p
+	s.commandCancel = cancel
 	s.mu.Unlock()
 	result := make(chan error, 1)
-	go func() { err := execute(ctx); result <- err; s.send(commandFinishedMsg{err: err}) }()
+	go func() { err := execute(runCtx); result <- err; s.send(commandFinishedMsg{err: err}) }()
 	_, uiErr := p.Run()
+	// If the terminal or Bubble Tea exits before execution, stop the command and
+	// wait for runtime cleanup rather than leaving a workflow running unseen.
+	cancel()
 	execErr := <-result
 	s.mu.Lock()
 	s.closed = true
+	s.commandCancel = nil
 	s.mu.Unlock()
 	return multierr.Combine(execErr, uiErr)
 }

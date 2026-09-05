@@ -4,8 +4,12 @@
 package exec
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"os"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -34,4 +38,32 @@ func TestTUIQuitConfirmationCancelsRunningWorkflow(t *testing.T) {
 	assert.False(t, canceled)
 	_, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Text: "y"}))
 	assert.True(t, canceled)
+}
+
+func TestTUIExitCancelsActiveExecution(t *testing.T) {
+	session := newTUISession(bytes.NewReader(nil), io.Discard)
+	finished := make(chan error, 1)
+	go func() {
+		finished <- session.Run(context.Background(), func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}()
+
+	require.Eventually(t, func() bool {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		return session.program != nil
+	}, time.Second, time.Millisecond)
+	session.mu.Lock()
+	program := session.program
+	session.mu.Unlock()
+	program.Quit()
+
+	select {
+	case err := <-finished:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("TUI exit did not cancel active execution")
+	}
 }
