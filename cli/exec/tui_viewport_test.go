@@ -125,3 +125,29 @@ func TestPagingFromPartialTailPreservesPageBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestTerminalStepExposesFinalPartialLineBeforeWorkflowFinishes(t *testing.T) {
+	for _, state := range []execStepState{stepSuccessful, stepFailed, stepCanceled} {
+		t.Run(state.String(), func(t *testing.T) {
+			m := extensionModel()
+			at := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+			m.Update(eventMsg{event: stepStateChanged{WorkflowID: "w", StepID: "a", State: stepRunning, At: at}})
+			m.Update(eventMsg{event: stepStateChanged{WorkflowID: "w", StepID: "b", State: stepRunning, At: at}})
+			m.appendLog("a", []byte("0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\nfinal message"), false)
+			m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyHome}))
+			log := m.activeLog()
+			visible := func() []string { return log.viewport.visible(log.lines(), m.logHeight()) }
+			require.Equal(t, []string{"0", "1", "2"}, visible())
+			terminal := eventMsg{event: stepStateChanged{WorkflowID: "w", StepID: "a", State: state, At: at.Add(time.Second)}}
+			m.Update(terminal)
+			m.Update(terminal) // Duplicate terminal events must not move the anchor again.
+			require.True(t, m.running)
+			require.Equal(t, stepRunning, m.states["b"])
+			require.Equal(t, []string{"0", "1", "2"}, visible())
+			for range 4 {
+				m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
+			}
+			require.Equal(t, []string{"10", "11", "final message"}, visible())
+		})
+	}
+}

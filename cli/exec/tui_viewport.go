@@ -146,6 +146,12 @@ func (m *tuiModel) applyState(event stepStateChanged) {
 		return
 	default:
 		timing.finished = event.At
+		// Runtime terminal traces follow this step's log drainage, even when
+		// other steps in the workflow are still running.
+		if log := m.logs[event.StepID]; log != nil {
+			log.finish()
+			log.clamp(m.stepLogHeight())
+		}
 	}
 	m.states[event.StepID] = event.State
 	m.timings[event.StepID] = timing
@@ -225,7 +231,11 @@ func (m *tuiModel) stepCommands(id string) []string {
 }
 
 func (m *tuiModel) newStepLog(id string) *stepLog {
-	return &stepLog{groups: newLogGroups(m.stepCommands(id))}
+	state := m.states[id]
+	return &stepLog{
+		groups:   newLogGroups(m.stepCommands(id)),
+		complete: state != stepPending && state != stepRunning,
+	}
 }
 
 func (m *tuiModel) clampViewports() {
