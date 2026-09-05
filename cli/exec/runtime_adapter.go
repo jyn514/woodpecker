@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	backend_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
 	pipeline_errors "go.woodpecker-ci.org/woodpecker/v3/pipeline/errors"
@@ -31,10 +32,10 @@ func stateFromRuntime(s backend_types.State) execStepState {
 	return stepSuccessful
 }
 
-func eventTracer(workflowID string, submit func(execEvent)) tracing.Tracer {
+func eventTracer(workflowID string, submit func(execEvent), now func() time.Time) tracing.Tracer {
 	return tracing.TraceFunc(func(s *state.State) error {
 		if s != nil && s.CurrStep != nil {
-			submit(stepStateChanged{WorkflowID: workflowID, StepID: s.CurrStep.UUID, State: stateFromRuntime(s.CurrStepState)})
+			submit(stepStateChanged{WorkflowID: workflowID, StepID: s.CurrStep.UUID, State: stateFromRuntime(s.CurrStepState), At: now()})
 		}
 		return nil
 	})

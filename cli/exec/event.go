@@ -5,6 +5,7 @@ package exec
 
 import (
 	"fmt"
+	"time"
 
 	backend_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
 )
@@ -35,10 +36,12 @@ const (
 	stepFailed
 	stepCanceled
 	stepSkipped
+	stepUnknown
+	stepNotRun
 )
 
 func (s execStepState) String() string {
-	return [...]string{"pending", "running", "successful", "failed", "canceled", "skipped"}[s]
+	return [...]string{"pending", "running", "successful", "failed", "canceled", "skipped", "unknown", "not-run"}[s]
 }
 
 type execEvent interface{ isExecEvent() }
@@ -55,6 +58,7 @@ type stepStateChanged struct {
 	WorkflowID string
 	StepID     string
 	State      execStepState
+	At         time.Time
 }
 
 func (stepStateChanged) isExecEvent() {}

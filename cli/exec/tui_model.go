@@ -13,15 +13,40 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-type workflowStartedMsg execWorkflow
-type workflowFinishedMsg struct {
-	id  string
-	err error
+type (
+	workflowStartedMsg  execWorkflow
+	workflowFinishedMsg struct {
+		id  string
+		err error
+		At  time.Time
+	}
+)
+
+type (
+	commandFinishedMsg   struct{ err error }
+	probeDrainTimeoutMsg struct{}
+	durationTickMsg      time.Time
+)
+
+type stepTiming struct {
+	started, finished time.Time
 }
-type commandFinishedMsg struct{ err error }
-type probeDrainTimeoutMsg struct{}
-type eventMsg struct{ event execEvent }
-type logReadyMsg struct{ workflowID, stepID string }
+
+func (t stepTiming) label(now time.Time) string {
+	if t.started.IsZero() {
+		return ""
+	}
+	end := t.finished
+	if end.IsZero() {
+		end = now
+	}
+	return " (" + max(end.Sub(t.started), 0).Round(time.Second).String() + ")"
+}
+
+type (
+	eventMsg    struct{ event execEvent }
+	logReadyMsg struct{ workflowID, stepID string }
+)
 
 const (
 	maxPendingLogBytes  = 256 * 1024
@@ -37,6 +62,7 @@ type stepLog struct {
 type completedWorkflow struct {
 	workflow execWorkflow
 	states   map[string]execStepState
+	timings  map[string]stepTiming
 	err      error
 }
 
@@ -44,6 +70,9 @@ type tuiModel struct {
 	workflow            execWorkflow
 	states              map[string]execStepState
 	logs                map[string]*stepLog
+	timings             map[string]stepTiming
+	now                 time.Time
+	tickScheduled       bool
 	selected            int
 	width, height       int
 	running, confirming bool
@@ -72,17 +101,33 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workflow = execWorkflow(msg)
 		m.states = map[string]execStepState{}
 		m.logs = map[string]*stepLog{}
+		m.timings = map[string]stepTiming{}
 		m.selected = 0
 		m.running = true
 		m.confirming = false
 	case workflowFinishedMsg:
+		if msg.id != m.workflow.ID || !m.running {
+			return m, nil
+		}
+		for _, step := range m.steps() {
+			state := m.states[step.ID]
+			timing := m.timings[step.ID]
+			switch state {
+			case stepRunning:
+				m.states[step.ID] = stepUnknown
+				timing.finished = msg.At
+				m.timings[step.ID] = timing
+			case stepPending:
+				m.states[step.ID] = stepNotRun
+			}
+		}
 		m.running = false
 		m.finishedErr = msg.err
 		states := make(map[string]execStepState, len(m.states))
 		for id, state := range m.states {
 			states[id] = state
 		}
-		m.completed = append(m.completed, completedWorkflow{workflow: m.workflow, states: states, err: msg.err})
+		m.completed = append(m.completed, completedWorkflow{workflow: m.workflow, states: states, timings: m.timings, err: msg.err})
 	case commandFinishedMsg:
 		m.running = false
 		m.finishedErr = msg.err
@@ -105,11 +150,18 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.finishing && m.probesDrained() {
 			return m, tea.Quit
 		}
+	case durationTickMsg:
+		m.tickScheduled = false
+		if time.Time(msg).After(m.now) {
+			m.now = time.Time(msg)
+		}
+		return m, m.scheduleTick()
 	case eventMsg:
 		switch event := msg.event.(type) {
 		case stepStateChanged:
 			if event.WorkflowID == m.workflow.ID {
-				m.states[event.StepID] = event.State
+				m.applyState(event)
+				return m, m.scheduleTick()
 			}
 		case diagnosticFragment:
 			m.appendDiagnostic(event.Data)
@@ -178,7 +230,7 @@ func (m *tuiModel) finalSummary() string {
 				if !ok {
 					state = stepPending
 				}
-				fmt.Fprintf(&b, "  %-10s %s\n", state, step.Name)
+				fmt.Fprintf(&b, "  %-10s %s%s\n", state, step.Name, result.timings[step.ID].label(m.now))
 			}
 		}
 	}
@@ -266,7 +318,7 @@ func (m *tuiModel) View() tea.View {
 		if !ok {
 			state = stepPending
 		}
-		writeViewLine(&b, m.width, fmt.Sprintf("%s%-10s %s", cursor, state, step.Name))
+		writeViewLine(&b, m.width, fmt.Sprintf("%s%-10s %s%s", cursor, state, step.Name, m.timings[step.ID].label(m.now)))
 	}
 	if end < len(steps) {
 		writeViewLine(&b, m.width, fmt.Sprintf("  … %d later steps", len(steps)-end))

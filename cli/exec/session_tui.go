@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"go.uber.org/multierr"
@@ -33,6 +34,7 @@ func (w diagnosticWriter) Write(p []byte) (int, error) {
 }
 
 type tuiSession struct {
+	now                func() time.Time
 	input              io.Reader
 	output             io.Writer
 	program            *tea.Program
@@ -55,11 +57,13 @@ func validateTUITerminals(input, output *os.File) error {
 
 func newTUISession(input io.Reader, output io.Writer, suppressDiagnostic ...bool) *tuiSession {
 	suppress := len(suppressDiagnostic) != 0 && suppressDiagnostic[0]
-	return &tuiSession{input: input, output: output, suppressDiagnostic: suppress, ingress: map[string]*ingressLog{}}
+	return &tuiSession{now: time.Now, input: input, output: output, suppressDiagnostic: suppress, ingress: map[string]*ingressLog{}}
 }
+
 func (s *tuiSession) Print(_ outputStream, message string) {
 	s.Submit(diagnosticFragment{Data: []byte(message)})
 }
+
 func (s *tuiSession) send(msg tea.Msg) {
 	s.mu.Lock()
 	p, closed := s.program, s.closed
@@ -70,8 +74,9 @@ func (s *tuiSession) send(msg tea.Msg) {
 }
 func (s *tuiSession) BeginWorkflow(w execWorkflow) { s.send(workflowStartedMsg(w)) }
 func (s *tuiSession) FinishWorkflow(id string, err error) {
-	s.send(workflowFinishedMsg{id: id, err: err})
+	s.send(workflowFinishedMsg{id: id, err: err, At: s.now()})
 }
+
 func (s *tuiSession) Submit(event execEvent) {
 	fragment, ok := event.(stepLogFragment)
 	if !ok {
@@ -101,6 +106,7 @@ func (s *tuiSession) Submit(event execEvent) {
 		s.send(logReadyMsg{workflowID: fragment.WorkflowID, stepID: fragment.StepID})
 	}
 }
+
 func (s *tuiSession) drainLog(workflowID, stepID string) ([]byte, bool) {
 	key := workflowID + "\x00" + stepID
 	s.mu.Lock()
@@ -114,7 +120,7 @@ func (s *tuiSession) drainLog(workflowID, stepID string) ([]byte, bool) {
 	return data, truncated
 }
 func (s *tuiSession) Logger(id string) logging.Logger { return eventLogger(id, s.Submit) }
-func (s *tuiSession) Tracer(id string) tracing.Tracer { return eventTracer(id, s.Submit) }
+func (s *tuiSession) Tracer(id string) tracing.Tracer { return eventTracer(id, s.Submit, s.now) }
 func (s *tuiSession) cancelCommand() {
 	s.mu.Lock()
 	cancel := s.commandCancel
@@ -123,9 +129,11 @@ func (s *tuiSession) cancelCommand() {
 		cancel()
 	}
 }
+
 func (*tuiSession) ExecuteWorkflow(parent context.Context, _ execWorkflow, execute func(context.Context) error) error {
 	return execute(parent)
 }
+
 func (s *tuiSession) Run(ctx context.Context, execute func(context.Context) error) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

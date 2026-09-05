@@ -44,6 +44,8 @@ Use <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>k</kbd>/<kbd>j</kbd> to select a step.
 
 Logs are kept in memory only. The interface retains at most 1 MiB per step, buffers at most 256 KiB of pending display data per step, and retains at most 256 KiB of diagnostics. A truncation marker indicates when earlier output was discarded. The backend log reader continues draining after truncation or cancellation.
 
+Step durations in the interface and final summary are observed by the CLI, not measurements of backend process runtime. Running durations advance until a terminal event is observed. At workflow completion, a step still reported as running becomes `unknown` and its duration freezes; a pending step that never started becomes `not-run`. Neither fallback implies success.
+
 ## Pass metadata
 
 Metadata values are set automatically, but you can override them to test conditions such as branches, pull requests, tags, and events:
