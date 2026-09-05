@@ -26,7 +26,6 @@ import (
 
 	"codeberg.org/6543/xyaml/v2"
 	"github.com/oklog/ulid/v2"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 	"go.uber.org/multierr"
@@ -75,13 +74,9 @@ func run(ctx context.Context, c *cli.Command) error {
 		if err := validateTUITerminals(os.Stdin, os.Stdout); err != nil {
 			return err
 		}
-		// The TUI owns stdout's terminal. Suppress global diagnostics through
-		// zerolog's concurrency-safe level override so asynchronous logs cannot
-		// corrupt the display.
-		previousLogLevel := zerolog.GlobalLevel()
-		zerolog.SetGlobalLevel(zerolog.Disabled)
-		defer zerolog.SetGlobalLevel(previousLogLevel)
-		session = newTUISession(os.Stdin, os.Stdout)
+		logDestination := c.String("log-file")
+		suppressTerminalDiagnostics := logDestination == "" || logDestination == "stdout" || logDestination == "stderr"
+		session = newTUISession(os.Stdin, os.Stdout, suppressTerminalDiagnostics)
 	}
 	defer session.Close()
 	return session.Run(ctx, func(ctx context.Context) error { return dispatch(ctx, c, session) })

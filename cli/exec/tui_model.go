@@ -26,6 +26,7 @@ type logReadyMsg struct{ workflowID, stepID string }
 const (
 	maxPendingLogBytes  = 256 * 1024
 	maxRetainedLogBytes = 1024 * 1024
+	maxDiagnosticBytes  = 256 * 1024
 )
 
 type stepLog struct {
@@ -51,6 +52,8 @@ type tuiModel struct {
 	syncReportSeen      bool
 	unicodeReportSeen   bool
 	completed           []completedWorkflow
+	diagnostics         stepLog
+	showDiagnostics     bool
 	cancel              func()
 	drainLog            func(string, string) ([]byte, bool)
 }
@@ -103,8 +106,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case eventMsg:
-		if state, ok := msg.event.(stepStateChanged); ok && state.WorkflowID == m.workflow.ID {
-			m.states[state.StepID] = state.State
+		switch event := msg.event.(type) {
+		case stepStateChanged:
+			if event.WorkflowID == m.workflow.ID {
+				m.states[event.StepID] = event.State
+			}
+		case diagnosticFragment:
+			m.appendDiagnostic(event.Data)
 		}
 	case logReadyMsg:
 		if msg.workflowID == m.workflow.ID && m.drainLog != nil {
@@ -120,9 +128,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected--
 			}
 		case "down", "j":
-			if m.selected+1 < len(m.steps()) {
+			if !m.showDiagnostics && m.selected+1 < len(m.steps()) {
 				m.selected++
 			}
+		case "d":
+			m.showDiagnostics = !m.showDiagnostics
 		case "ctrl+c":
 			if m.running {
 				m.cancel()
@@ -175,6 +185,15 @@ func (m *tuiModel) finalSummary() string {
 	return b.String()
 }
 
+func (m *tuiModel) appendDiagnostic(data []byte) {
+	m.diagnostics.data = append(m.diagnostics.data, data...)
+	if len(m.diagnostics.data) <= maxDiagnosticBytes {
+		return
+	}
+	m.diagnostics.data = append([]byte(nil), m.diagnostics.data[len(m.diagnostics.data)-maxDiagnosticBytes:]...)
+	m.diagnostics.truncated = true
+}
+
 func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {
 	log := m.logs[id]
 	if log == nil {
@@ -207,6 +226,30 @@ func (m *tuiModel) View() tea.View {
 	var b strings.Builder
 	writeViewLine(&b, m.width, fmt.Sprintf("woodpecker exec — %s", m.workflow.Name))
 	b.WriteByte('\n')
+
+	if m.showDiagnostics {
+		writeViewLine(&b, m.width, "Diagnostics")
+		if m.diagnostics.truncated {
+			writeViewLine(&b, m.width, "[earlier diagnostics truncated]")
+		}
+		lines := strings.Split(string(m.diagnostics.data), "\n")
+		if m.height > 0 {
+			limit := max(m.height-6, 1)
+			if len(lines) > limit {
+				lines = lines[len(lines)-limit:]
+			}
+		}
+		for i, line := range lines {
+			if i == len(lines)-1 && line == "" {
+				continue
+			}
+			writeViewLine(&b, m.width, line)
+		}
+		writeViewLine(&b, m.width, "d steps • q quit")
+		view := tea.NewView(b.String())
+		view.AltScreen = true
+		return view
+	}
 
 	steps := m.steps()
 	start, end := m.visibleStepRange(len(steps))
@@ -253,7 +296,7 @@ func (m *tuiModel) View() tea.View {
 	if m.confirming {
 		writeViewLine(&b, m.width, "Cancel this command and its running workflow? (y/N)")
 	} else {
-		writeViewLine(&b, m.width, "↑/↓ select • q quit")
+		writeViewLine(&b, m.width, "↑/↓ select • q quit • d logs")
 	}
 	view := tea.NewView(b.String())
 	view.AltScreen = true

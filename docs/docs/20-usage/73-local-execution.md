@@ -40,9 +40,9 @@ woodpecker-cli exec --no-tui .woodpecker/my-first-workflow.yaml
 woodpecker-cli exec --tui .woodpecker/my-first-workflow.yaml
 ```
 
-Use <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>k</kbd>/<kbd>j</kbd> to select a step. Press <kbd>q</kbd> to quit. While a workflow is running, quitting asks for confirmation and then cancels the command, including any remaining workflows; Woodpecker waits for backend cleanup before restoring the terminal. <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels immediately.
+Use <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>k</kbd>/<kbd>j</kbd> to select a step. Press <kbd>d</kbd> to switch between step logs and bounded Woodpecker diagnostics. Press <kbd>q</kbd> to quit. While a workflow is running, quitting asks for confirmation and then cancels the command, including any remaining workflows; Woodpecker waits for backend cleanup before restoring the terminal. <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels immediately.
 
-Logs are kept in memory only. The interface retains at most 1 MiB per step and buffers at most 256 KiB of pending display data per step. A truncation marker indicates when earlier output was discarded. The backend log reader continues draining after truncation or cancellation.
+Logs are kept in memory only. The interface retains at most 1 MiB per step, buffers at most 256 KiB of pending display data per step, and retains at most 256 KiB of diagnostics. A truncation marker indicates when earlier output was discarded. The backend log reader continues draining after truncation or cancellation.
 
 ## Pass metadata
 

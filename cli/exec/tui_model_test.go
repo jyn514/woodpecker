@@ -78,6 +78,18 @@ func TestTUIViewKeepsSelectionAndControlsVisible(t *testing.T) {
 	assert.LessOrEqual(t, len(strings.Split(strings.TrimSuffix(view, "\n"), "\n")), 12)
 }
 
+func TestTUIDiagnosticsAreBoundedAndSelectable(t *testing.T) {
+	m := newTUIModel(func() {})
+	m.appendDiagnostic(bytes.Repeat([]byte{'x'}, maxDiagnosticBytes+1))
+	assert.Len(t, m.diagnostics.data, maxDiagnosticBytes)
+	assert.True(t, m.diagnostics.truncated)
+
+	_, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Text: "d"}))
+	assert.True(t, m.showDiagnostics)
+	assert.Contains(t, m.View().Content, "Diagnostics")
+	assert.Contains(t, m.View().Content, "earlier diagnostics truncated")
+}
+
 func TestIngressIsBoundedAndStopsAcceptingAfterClose(t *testing.T) {
 	s := newTUISession(bytes.NewReader(nil), &bytes.Buffer{})
 	s.Submit(stepLogFragment{WorkflowID: "w", StepID: "s", Data: bytes.Repeat([]byte{'x'}, maxPendingLogBytes*2)})

@@ -59,6 +59,12 @@ type stepStateChanged struct {
 
 func (stepStateChanged) isExecEvent() {}
 
+type diagnosticFragment struct {
+	Data []byte
+}
+
+func (diagnosticFragment) isExecEvent() {}
+
 func workflowDescriptor(name string, config *backend_types.Config) execWorkflow {
 	w := execWorkflow{ID: name, Name: name, Stages: make([]execStage, 0, len(config.Stages))}
 	for i, stage := range config.Stages {

@@ -74,12 +74,13 @@ func SetupGlobalLogger(ctx context.Context, c *cli.Command, outputLvl bool) erro
 		noColor = true
 	}
 
-	log.Logger = zerolog.New(file).With().Timestamp().Logger()
+	globalOutput.setBase(file)
+	log.Logger = zerolog.New(globalOutput).With().Timestamp().Logger()
 
 	if pretty {
 		log.Logger = log.Output(
 			zerolog.ConsoleWriter{
-				Out:     file,
+				Out:     globalOutput,
 				NoColor: noColor,
 			},
 		)

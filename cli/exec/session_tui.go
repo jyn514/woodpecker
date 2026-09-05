@@ -16,6 +16,7 @@ import (
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/logging"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/tracing"
+	shared_logger "go.woodpecker-ci.org/woodpecker/v3/shared/logger"
 )
 
 type ingressLog struct {
@@ -24,14 +25,22 @@ type ingressLog struct {
 	truncated bool
 }
 
+type diagnosticWriter struct{ session *tuiSession }
+
+func (w diagnosticWriter) Write(p []byte) (int, error) {
+	w.session.Submit(diagnosticFragment{Data: append([]byte(nil), p...)})
+	return len(p), nil
+}
+
 type tuiSession struct {
-	input         io.Reader
-	output        io.Writer
-	program       *tea.Program
-	mu            sync.Mutex
-	commandCancel context.CancelFunc
-	closed        bool
-	ingress       map[string]*ingressLog
+	input              io.Reader
+	output             io.Writer
+	program            *tea.Program
+	mu                 sync.Mutex
+	commandCancel      context.CancelFunc
+	closed             bool
+	suppressDiagnostic bool
+	ingress            map[string]*ingressLog
 }
 
 func validateTUITerminals(input, output *os.File) error {
@@ -44,10 +53,13 @@ func validateTUITerminals(input, output *os.File) error {
 	return nil
 }
 
-func newTUISession(input io.Reader, output io.Writer) *tuiSession {
-	return &tuiSession{input: input, output: output, ingress: map[string]*ingressLog{}}
+func newTUISession(input io.Reader, output io.Writer, suppressDiagnostic ...bool) *tuiSession {
+	suppress := len(suppressDiagnostic) != 0 && suppressDiagnostic[0]
+	return &tuiSession{input: input, output: output, suppressDiagnostic: suppress, ingress: map[string]*ingressLog{}}
 }
-func (*tuiSession) Print(outputStream, string) {}
+func (s *tuiSession) Print(_ outputStream, message string) {
+	s.Submit(diagnosticFragment{Data: []byte(message)})
+}
 func (s *tuiSession) send(msg tea.Msg) {
 	s.mu.Lock()
 	p, closed := s.program, s.closed
@@ -124,6 +136,10 @@ func (s *tuiSession) Run(ctx context.Context, execute func(context.Context) erro
 	s.program = p
 	s.commandCancel = cancel
 	s.mu.Unlock()
+
+	restoreDiagnostics := shared_logger.CaptureGlobalOutput(diagnosticWriter{session: s}, s.suppressDiagnostic)
+	defer restoreDiagnostics()
+
 	result := make(chan error, 1)
 	go func() { err := execute(runCtx); result <- err; s.send(commandFinishedMsg{err: err}) }()
 	finalModel, uiErr := p.Run()
