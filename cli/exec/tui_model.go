@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type workflowStartedMsg execWorkflow
@@ -17,6 +19,7 @@ type workflowFinishedMsg struct {
 	err error
 }
 type commandFinishedMsg struct{ err error }
+type probeDrainTimeoutMsg struct{}
 type eventMsg struct{ event execEvent }
 type logReadyMsg struct{ workflowID, stepID string }
 
@@ -37,6 +40,9 @@ type tuiModel struct {
 	width, height       int
 	running, confirming bool
 	finishedErr         error
+	finishing           bool
+	syncReportSeen      bool
+	unicodeReportSeen   bool
 	cancel              func()
 	drainLog            func(string, string) ([]byte, bool)
 }
@@ -64,7 +70,25 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commandFinishedMsg:
 		m.running = false
 		m.finishedErr = msg.err
-		return m, tea.Quit
+		m.finishing = true
+		if m.probesDrained() {
+			return m, tea.Quit
+		}
+		return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return probeDrainTimeoutMsg{} })
+	case probeDrainTimeoutMsg:
+		if m.finishing {
+			return m, tea.Quit
+		}
+	case tea.ModeReportMsg:
+		switch msg.Mode {
+		case ansi.ModeSynchronizedOutput:
+			m.syncReportSeen = true
+		case ansi.ModeUnicodeCore:
+			m.unicodeReportSeen = true
+		}
+		if m.finishing && m.probesDrained() {
+			return m, tea.Quit
+		}
 	case eventMsg:
 		if state, ok := msg.event.(stepStateChanged); ok && state.WorkflowID == m.workflow.ID {
 			m.states[state.StepID] = state.State
@@ -107,6 +131,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+func (m *tuiModel) probesDrained() bool {
+	return m.syncReportSeen && m.unicodeReportSeen
+}
+
 func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {
 	log := m.logs[id]
 	if log == nil {

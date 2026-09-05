@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,6 +24,20 @@ func TestTUIModelSelectionStateAndResize(t *testing.T) {
 	assert.Equal(t, 1, m.selected)
 	assert.Equal(t, 80, m.width)
 	assert.Contains(t, m.View().Content, "successful first")
+}
+
+func TestTUIWaitsForCapabilityRepliesBeforeQuitting(t *testing.T) {
+	m := newTUIModel(func() {})
+	_, timeout := m.Update(commandFinishedMsg{})
+	require.NotNil(t, timeout)
+	assert.True(t, m.finishing)
+
+	_, quit := m.Update(tea.ModeReportMsg{Mode: ansi.ModeSynchronizedOutput})
+	assert.Nil(t, quit)
+	_, quit = m.Update(tea.ModeReportMsg{Mode: ansi.ModeUnicodeCore})
+	require.NotNil(t, quit)
+	_, ok := quit().(tea.QuitMsg)
+	assert.True(t, ok)
 }
 
 func TestRetainedLogsAreBoundedAndMarked(t *testing.T) {
