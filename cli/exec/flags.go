@@ -22,6 +22,10 @@ import (
 
 var flags = []cli.Flag{
 	&cli.BoolFlag{
+		Name:  "tui",
+		Usage: "run with an interactive terminal interface",
+	},
+	&cli.BoolFlag{
 		Sources: cli.EnvVars("WOODPECKER_LOCAL"),
 		Name:    "local",
 		Usage:   "run from local directory",

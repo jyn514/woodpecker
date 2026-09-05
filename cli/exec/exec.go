@@ -63,7 +63,14 @@ var backends = []backend_types.Backend{
 }
 
 func run(ctx context.Context, c *cli.Command) error {
-	session := newPlainSession(sessionWriters{stdout: os.Stdout, stderr: os.Stderr})
+	var session execSession = newPlainSession(sessionWriters{stdout: os.Stdout, stderr: os.Stderr})
+	if c.Bool("tui") {
+		if err := validateTUITerminals(os.Stdin, os.Stdout); err != nil {
+			return err
+		}
+		session = newTUISession(os.Stdin, os.Stdout)
+	}
+	defer session.Close()
 	return session.Run(ctx, func(ctx context.Context) error { return dispatch(ctx, c, session) })
 }
 
@@ -284,23 +291,23 @@ func runExec(ctx context.Context, c *cli.Command, session execSession, yamls []*
 			session.Print(outputStdout, fmt.Sprintf("ctrl+c received, terminating workflow '%s'\n", item.Workflow.Name))
 		})
 
-		runtime := pipeline_runtime.New(
-			item.Config, backendEngine,
-			pipeline_runtime.WithContext(pipelineCtx), //nolint:contextcheck
-			pipeline_runtime.WithLogger(session.Logger(workflow.ID)),
-			pipeline_runtime.WithTracer(session.Tracer(workflow.ID)),
-			pipeline_runtime.WithDescription(map[string]string{
-				"CLI": "exec",
-			}),
-		)
-
-		err := session.ExecuteWorkflow(pipelineCtx, workflow, func(context.Context) error {
-			return runtime.Run(ctx)
+		var workflowRuntime *pipeline_runtime.Runtime
+		err := session.ExecuteWorkflow(pipelineCtx, workflow, func(workflowCtx context.Context) error {
+			workflowRuntime = pipeline_runtime.New(
+				item.Config, backendEngine,
+				pipeline_runtime.WithContext(workflowCtx),
+				pipeline_runtime.WithLogger(session.Logger(workflow.ID)),
+				pipeline_runtime.WithTracer(session.Tracer(workflow.ID)),
+				pipeline_runtime.WithDescription(map[string]string{
+					"CLI": "exec",
+				}),
+			)
+			return workflowRuntime.Run(ctx)
 		})
 		if err == nil {
 			// Run does not report step failures as runtime errors, but a failed
 			// step must still let the command exit non-zero.
-			err = runtime.Err()
+			err = workflowRuntime.Err()
 		}
 		session.FinishWorkflow(workflow.ID, err)
 		if err != nil {

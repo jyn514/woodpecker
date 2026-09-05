@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	al.essio.dev/pkg/shellescape v1.6.1
+	charm.land/bubbletea/v2 v2.0.2
 	charm.land/huh/v2 v2.0.3
 	code.gitea.io/sdk/gitea v0.25.1
 	codeberg.org/6543/go-yaml2json/v2 v2.0.0
@@ -78,7 +79,6 @@ require (
 
 require (
 	charm.land/bubbles/v2 v2.0.0 // indirect
-	charm.land/bubbletea/v2 v2.0.2 // indirect
 	charm.land/lipgloss/v2 v2.0.1 // indirect
 	codeberg.org/6543/xyaml v1.1.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
