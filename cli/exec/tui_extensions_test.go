@@ -15,6 +15,8 @@
 package exec
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +32,45 @@ func extensionModel() *tuiModel {
 	return m
 }
 func key(m *tuiModel, text string) { m.Update(tea.KeyPressMsg(tea.Key{Text: text})) }
+
+func TestViewportKeepsIndependentScrollAndConfirmation(t *testing.T) {
+	m := extensionModel()
+	m.appendLog("a", []byte("0\n1\n2\n3\n4\n5\n6\n"), false)
+	log := m.activeLog()
+	log.viewport.move("home", len(displayLines(log.data)), m.logHeight())
+	before := log.viewport.visible(displayLines(log.data), m.logHeight())
+	m.appendLog("a", []byte("7\n"), false)
+	assert.Equal(t, before, log.viewport.visible(displayLines(log.data), m.logHeight()))
+	offset := log.viewport.offsetFromBottom
+	m.appendLog("a", []byte("partial"), false)
+	assert.Equal(t, offset, log.viewport.offsetFromBottom)
+	m.selected = 1
+	assert.False(t, m.activeLog().viewport.manual)
+	m.selected = 0
+	assert.True(t, m.activeLog().viewport.manual)
+	key(m, "f")
+	assert.False(t, log.viewport.manual)
+	key(m, "q")
+	key(m, "d")
+	key(m, "j")
+	assert.False(t, m.showDiagnostics)
+	assert.Zero(t, m.selected)
+	key(m, "n")
+	key(m, "d")
+	assert.True(t, m.showDiagnostics)
+	m.Update(workflowStartedMsg(execWorkflow{ID: "next"}))
+	assert.Empty(t, m.logs)
+}
+
+func TestViewportClampsAndFollows(t *testing.T) {
+	v := logViewport{}
+	v.move("home", 20, 5)
+	assert.Equal(t, 15, v.offsetFromBottom)
+	v.clamp(8, 5)
+	assert.Equal(t, 3, v.offsetFromBottom)
+	v.move("f", 8, 5)
+	assert.Equal(t, []string{"d", "e"}, v.visible([]string{"a", "b", "c", "d", "e"}, 2))
+}
 
 func TestDurationsFreezeFirstBoundariesAndSnapshotFallbacks(t *testing.T) {
 	m := extensionModel()
@@ -56,6 +97,24 @@ func TestDurationsFreezeFirstBoundariesAndSnapshotFallbacks(t *testing.T) {
 	assert.Contains(t, m.finalSummary(), "(4s)")
 	m.Update(workflowStartedMsg(execWorkflow{ID: "next"}))
 	assert.Contains(t, m.finalSummary(), "(4s)")
+}
+
+func TestPausedLogSurvivesEvictionAndPartialLines(t *testing.T) {
+	m := extensionModel()
+	var data strings.Builder
+	for i := 0; i < 1200; i++ {
+		fmt.Fprintf(&data, "%04d%s\n", i, strings.Repeat("x", 1000))
+	}
+	m.appendLog("a", []byte(data.String()), false)
+	log := m.activeLog()
+	log.viewport.move("pgup", len(log.lines()), m.logHeight())
+	before := log.viewport.visible(log.lines(), m.logHeight())
+	m.appendLog("a", []byte(strings.Repeat("y", 2000)+"\n"), false)
+	assert.Equal(t, before, log.viewport.visible(log.lines(), m.logHeight()))
+	m.appendLog("a", []byte("partial"), false)
+	assert.Equal(t, before, log.viewport.visible(log.lines(), m.logHeight()))
+	m.appendLog("a", []byte("\n"), false)
+	assert.Equal(t, before, log.viewport.visible(log.lines(), m.logHeight()))
 }
 
 func TestLateTickCannotDecreaseObservedTime(t *testing.T) {

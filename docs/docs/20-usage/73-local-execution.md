@@ -40,11 +40,23 @@ woodpecker-cli exec --no-tui .woodpecker/my-first-workflow.yaml
 woodpecker-cli exec --tui .woodpecker/my-first-workflow.yaml
 ```
 
-Use <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>k</kbd>/<kbd>j</kbd> to select a step. Press <kbd>d</kbd> to switch between step logs and bounded Woodpecker diagnostics. Press <kbd>q</kbd> to quit. While a workflow is running, quitting asks for confirmation and then cancels the command, including any remaining workflows; Woodpecker waits for backend cleanup before restoring the terminal. <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels immediately.
+Use these keys to navigate the interface:
 
-Logs are kept in memory only. The interface retains at most 1 MiB per step, buffers at most 256 KiB of pending display data per step, and retains at most 256 KiB of diagnostics. A truncation marker indicates when earlier output was discarded. The backend log reader continues draining after truncation or cancellation.
+| Key | Action |
+| --- | --- |
+| <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>k</kbd>/<kbd>j</kbd> | Select a step. |
+| <kbd>d</kbd> | Switch between step logs and Woodpecker diagnostics. |
+| <kbd>PgUp</kbd>/<kbd>PgDn</kbd> | Scroll the active log pane. |
+| <kbd>Home</kbd> | Jump to the oldest retained line. |
+| <kbd>End</kbd> or <kbd>f</kbd> | Jump to the newest line and resume following output. |
+
+Each step and the diagnostics pane keep an independent scroll position. Step logs initially follow new output, including when you first select a step. Scrolling pauses following so you can read earlier output; switching steps preserves each step's position. Step scroll positions reset when the next workflow starts. Resizing or log truncation may adjust the position to fit the remaining lines.
 
 Step durations in the interface and final summary are observed by the CLI, not measurements of backend process runtime. Running durations advance until a terminal event is observed. At workflow completion, a step still reported as running becomes `unknown` and its duration freezes; a pending step that never started becomes `not-run`. Neither fallback implies success.
+
+Press <kbd>q</kbd> to quit. While a workflow is running, quitting asks for confirmation and then cancels the command, including any remaining workflows; Woodpecker waits for backend cleanup before restoring the terminal. While confirmation is visible, navigation controls are inactive. <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels immediately.
+
+Logs are kept in memory only; the interface does not write log files. It retains at most 1 MiB per step, buffers at most 256 KiB of pending display data per step, and retains at most 256 KiB of diagnostics. A truncation marker indicates when earlier output was discarded. The backend log reader continues draining after truncation or cancellation. These presentation features do not change plain-text output.
 
 ## Pass metadata
 

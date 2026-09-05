@@ -14,11 +14,93 @@
 
 package exec
 
+// cspell:words pgup pgdown viewports
+
 import (
+	"strings"
 	"time"
 
 	"charm.land/bubbletea/v2"
 )
+
+const (
+	unboundedLogRows     = maxRetainedLogBytes
+	diagnosticChromeRows = 6
+	stepChromeRows       = 9
+)
+
+// The zero value follows the tail; manual scrolling is local to each log.
+type logViewport struct {
+	offsetFromBottom int
+	manual           bool
+}
+
+func displayLines(data []byte) []string {
+	if len(data) == 0 {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+}
+
+func (v *logViewport) appended(lines int) {
+	if v.manual {
+		v.offsetFromBottom += lines
+	}
+}
+
+func (v *logViewport) clamp(lines, height int) {
+	v.offsetFromBottom = min(max(v.offsetFromBottom, 0), max(lines-height, 0))
+}
+
+func (v *logViewport) move(key string, lines, height int) {
+	switch key {
+	case "pgup":
+		v.manual = true
+		v.offsetFromBottom += height
+	case "pgdown":
+		v.manual = true
+		v.offsetFromBottom -= height
+	case "home":
+		v.manual = true
+		v.offsetFromBottom = lines
+	case "end", "f":
+		v.manual = false
+		v.offsetFromBottom = 0
+	}
+	v.clamp(lines, height)
+}
+
+func (v logViewport) visible(lines []string, height int) []string {
+	v.clamp(len(lines), height)
+	end := len(lines) - v.offsetFromBottom
+	return lines[max(end-height, 0):end]
+}
+
+func (m *tuiModel) logHeight() int {
+	if m.height <= 0 {
+		return unboundedLogRows
+	}
+	if m.showDiagnostics {
+		return max(m.height-diagnosticChromeRows, 1)
+	}
+	start, end := m.visibleStepRange(len(m.steps()))
+	return max(m.height-(end-start)-stepChromeRows, 1)
+}
+
+func (m *tuiModel) activeLog() *stepLog {
+	if m.showDiagnostics {
+		return &m.diagnostics
+	}
+	steps := m.steps()
+	if len(steps) == 0 {
+		return nil
+	}
+	id := steps[m.selected].ID
+	if m.logs[id] == nil {
+		m.logs[id] = m.newStepLog(id)
+	}
+	return m.logs[id]
+}
 
 func (m *tuiModel) applyState(event stepStateChanged) {
 	if !m.running {
@@ -68,4 +150,44 @@ func (m *tuiModel) scheduleTick() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func (log *stepLog) finish() {
+	before := len(log.lines())
+	log.complete = true
+	log.viewport.appended(len(log.lines()) - before)
+}
+
+func (log *stepLog) lines() []string {
+	data := string(log.data)
+	// While paused, only completed lines advance the viewport. Once execution
+	// ends, expose the final unterminated line as well.
+	if log.viewport.manual && !log.complete && !strings.HasSuffix(data, "\n") {
+		if end := strings.LastIndexByte(data, '\n'); end >= 0 {
+			data = data[:end+1]
+		} else {
+			data = ""
+		}
+	}
+	return displayLines([]byte(data))
+}
+
+func (m *tuiModel) newStepLog(id string) *stepLog {
+	return &stepLog{}
+}
+
+func (m *tuiModel) clampViewports() {
+	start, end := m.visibleStepRange(len(m.steps()))
+	height := max(m.height-(end-start)-stepChromeRows, 1)
+	if m.height <= 0 {
+		height = unboundedLogRows
+	}
+	for _, log := range m.logs {
+		log.viewport.clamp(len(log.lines()), height)
+	}
+	diagnosticHeight := max(m.height-diagnosticChromeRows, 1)
+	if m.height <= 0 {
+		diagnosticHeight = unboundedLogRows
+	}
+	m.diagnostics.viewport.clamp(len(m.diagnostics.lines()), diagnosticHeight)
 }

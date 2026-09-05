@@ -3,6 +3,8 @@
 
 package exec
 
+// cspell:words pgup pgdown viewports
+
 import (
 	"bytes"
 	"fmt"
@@ -57,6 +59,8 @@ const (
 type stepLog struct {
 	data      []byte
 	truncated bool
+	viewport  logViewport
+	complete  bool
 }
 
 type completedWorkflow struct {
@@ -122,6 +126,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.running = false
+		for _, log := range m.logs {
+			log.finish()
+		}
+		m.clampViewports()
 		m.finishedErr = msg.err
 		states := make(map[string]execStepState, len(m.states))
 		for id, state := range m.states {
@@ -129,6 +137,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.completed = append(m.completed, completedWorkflow{workflow: m.workflow, states: states, timings: m.timings, err: msg.err})
 	case commandFinishedMsg:
+		m.diagnostics.finish()
+		m.clampViewports()
 		m.running = false
 		m.finishedErr = msg.err
 		m.finishing = true
@@ -173,10 +183,23 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.clampViewports()
 	case tea.KeyPressMsg:
+		key := msg.String()
+		if m.confirming && key != "y" && key != "n" && key != "esc" && key != "ctrl+c" {
+			return m, nil
+		}
+		switch key {
+		case "pgup", "pgdown", "home", "end", "f":
+			log := m.activeLog()
+			if log != nil {
+				log.viewport.move(key, len(log.lines()), m.logHeight())
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "up", "k":
-			if m.selected > 0 {
+			if !m.showDiagnostics && m.selected > 0 {
 				m.selected--
 			}
 		case "down", "j":
@@ -206,6 +229,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
 func (m *tuiModel) probesDrained() bool {
 	return m.syncReportSeen && m.unicodeReportSeen
 }
@@ -238,6 +262,8 @@ func (m *tuiModel) finalSummary() string {
 }
 
 func (m *tuiModel) appendDiagnostic(data []byte) {
+	defer m.clampViewports()
+	m.diagnostics.viewport.appended(bytes.Count(data, []byte{'\n'}))
 	m.diagnostics.data = append(m.diagnostics.data, data...)
 	if len(m.diagnostics.data) <= maxDiagnosticBytes {
 		return
@@ -247,11 +273,13 @@ func (m *tuiModel) appendDiagnostic(data []byte) {
 }
 
 func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {
+	defer m.clampViewports()
 	log := m.logs[id]
 	if log == nil {
-		log = &stepLog{}
+		log = m.newStepLog(id)
 		m.logs[id] = log
 	}
+	log.viewport.appended(bytes.Count(data, []byte{'\n'}))
 	log.data = append(log.data, data...)
 	log.truncated = log.truncated || ingressTruncated
 	if len(log.data) <= maxRetainedLogBytes {
@@ -267,6 +295,7 @@ func (m *tuiModel) appendLog(id string, data []byte, ingressTruncated bool) {
 	}
 	log.truncated = true
 }
+
 func (m *tuiModel) steps() []execStep {
 	var result []execStep
 	for _, stage := range m.workflow.Stages {
@@ -274,6 +303,7 @@ func (m *tuiModel) steps() []execStep {
 	}
 	return result
 }
+
 func (m *tuiModel) View() tea.View {
 	var b strings.Builder
 	writeViewLine(&b, m.width, fmt.Sprintf("woodpecker exec — %s", m.workflow.Name))
@@ -284,20 +314,15 @@ func (m *tuiModel) View() tea.View {
 		if m.diagnostics.truncated {
 			writeViewLine(&b, m.width, "[earlier diagnostics truncated]")
 		}
-		lines := strings.Split(string(m.diagnostics.data), "\n")
-		if m.height > 0 {
-			limit := max(m.height-6, 1)
-			if len(lines) > limit {
-				lines = lines[len(lines)-limit:]
-			}
-		}
-		for i, line := range lines {
-			if i == len(lines)-1 && line == "" {
-				continue
-			}
+		lines := m.diagnostics.viewport.visible(m.diagnostics.lines(), m.logHeight())
+		for _, line := range lines {
 			writeViewLine(&b, m.width, line)
 		}
-		writeViewLine(&b, m.width, "d steps • q quit")
+		if m.confirming {
+			writeViewLine(&b, m.width, "Cancel this command and its running workflow? (y/N)")
+		} else {
+			writeViewLine(&b, m.width, "d steps • q quit • PgUp/PgDn scroll • f tail")
+		}
 		view := tea.NewView(b.String())
 		view.AltScreen = true
 		return view
@@ -330,17 +355,8 @@ func (m *tuiModel) View() tea.View {
 			if log.truncated {
 				writeViewLine(&b, m.width, "[earlier output truncated]")
 			}
-			lines := strings.Split(string(log.data), "\n")
-			if m.height > 0 {
-				limit := max(m.height-(end-start)-9, 1)
-				if len(lines) > limit {
-					lines = lines[len(lines)-limit:]
-				}
-			}
-			for i, line := range lines {
-				if i == len(lines)-1 && line == "" {
-					continue
-				}
+			lines := log.viewport.visible(log.lines(), m.logHeight())
+			for _, line := range lines {
 				writeViewLine(&b, m.width, line)
 			}
 		}
@@ -348,7 +364,7 @@ func (m *tuiModel) View() tea.View {
 	if m.confirming {
 		writeViewLine(&b, m.width, "Cancel this command and its running workflow? (y/N)")
 	} else {
-		writeViewLine(&b, m.width, "↑/↓ select • q quit • d logs")
+		writeViewLine(&b, m.width, "↑/↓ select • q quit • d logs • PgUp/PgDn scroll • f tail")
 	}
 	view := tea.NewView(b.String())
 	view.AltScreen = true
