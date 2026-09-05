@@ -29,6 +29,20 @@ woodpecker-cli exec --backend-engine docker .woodpecker/my-first-workflow.yaml
 woodpecker-cli exec --backend-engine local .woodpecker/my-first-workflow.yaml
 ```
 
+## Use the terminal interface
+
+Pass `--tui` to show the configured steps, their current states, and logs for the selected step:
+
+```shell
+woodpecker-cli exec --tui .woodpecker/my-first-workflow.yaml
+```
+
+The terminal interface requires both standard input and standard output to be terminals. It is never enabled automatically, so redirected output and CI jobs continue to use plain text.
+
+Use <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>k</kbd>/<kbd>j</kbd> to select a step. Press <kbd>q</kbd> to quit. While a workflow is running, quitting asks for confirmation and then cancels the workflow; Woodpecker waits for backend cleanup before restoring the terminal. <kbd>Ctrl</kbd>+<kbd>C</kbd> cancels immediately.
+
+Logs are kept in memory only. The interface retains at most 1 MiB per step and buffers at most 256 KiB of pending display data per step. A truncation marker indicates when earlier output was discarded. The backend log reader continues draining after truncation or cancellation.
+
 ## Pass metadata
 
 Metadata values are set automatically, but you can override them to test conditions such as branches, pull requests, tags, and events:
